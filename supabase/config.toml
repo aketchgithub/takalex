@@ -1,0 +1,39 @@
+project_id = "takalex"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = false
+
+[auth]
+additional_redirect_urls = ["takalex://auth/callback"]
+enable_signup = false
+site_url = "http://localhost:3000"
+
+[auth.email]
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[db.pooler]
+default_pool_size = 15
+max_client_conn = 200
+
+[storage.vector]
+enabled = false
+
+[functions.invite-collector]
+verify_jwt = true

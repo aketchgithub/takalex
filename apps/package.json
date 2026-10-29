@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@rnmapbox/maps": "^10.3.15",
+    "@supabase/supabase-js": "^2.118.0",
+    "expo-location": "^58.0.19",
+    "expo-sqlite": "^58.0.14",
+    "react-hook-form": "^7.91.0",
+    "react-native-maps": "^1.29.11",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
+  }
+}
