@@ -106,11 +106,41 @@ CREATE POLICY public_submit_access_requests
     AND role <> 'admin'::public.user_role
   );
 
+-- Row access for active admins. What they can actually do is limited by the
+-- grants below: SELECT, and UPDATE of status and notes only (no DELETE).
 CREATE POLICY admin_manage_access_requests
   ON public.access_requests
   FOR ALL TO authenticated
-  USING (public.is_active_admin())
-  WITH CHECK (public.is_active_admin());
+  USING ((SELECT public.is_active_admin()))
+  WITH CHECK ((SELECT public.is_active_admin()));
+
+-- Reviewer fields always come from the server, whatever the caller sends.
+-- With a signed-in caller, reviewed_by is that caller. Without one (for
+-- example a service_role update from an Edge Function) the previous
+-- reviewer is kept, so server-side status changes never erase who reviewed.
+CREATE OR REPLACE FUNCTION public.set_access_request_reviewer()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    NEW.reviewed_by := auth.uid();
+  ELSE
+    NEW.reviewed_by := OLD.reviewed_by;
+  END IF;
+  NEW.reviewed_at := NOW();
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_access_request_reviewer()
+  FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER access_requests_set_reviewer
+  BEFORE UPDATE ON public.access_requests
+  FOR EACH ROW
+  EXECUTE FUNCTION public.set_access_request_reviewer();
 
 CREATE POLICY admin_view_invitations
   ON public.invitations
@@ -134,7 +164,11 @@ GRANT INSERT (
 ) ON public.access_requests TO anon, authenticated;
 
 -- Row access for these is limited to active admins by RLS above.
-GRANT SELECT, UPDATE, DELETE ON public.access_requests TO authenticated;
+-- Admins may only change status and notes; reviewed_by and reviewed_at are
+-- set by the access_requests_set_reviewer trigger. No DELETE for anon or
+-- authenticated.
+GRANT SELECT ON public.access_requests TO authenticated;
+GRANT UPDATE (status, notes) ON public.access_requests TO authenticated;
 GRANT SELECT ON public.invitations TO authenticated;
 
 -- REGISTER AN INVITATION

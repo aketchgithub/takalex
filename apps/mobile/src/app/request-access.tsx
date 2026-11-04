@@ -1,14 +1,25 @@
 import { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 
-import { Field, Message, PrimaryButton, Screen } from "@/components/Ui";
-import { submitAccessRequest, submitAccessRequestSchema } from "@/lib/access";
+import { Field, Message, PrimaryButton, Screen, uiColors } from "@/components/Ui";
+import {
+  submitAccessRequest,
+  submitAccessRequestSchema,
+  type AccessRequestRole,
+} from "@/lib/access";
+
+const ROLE_OPTIONS: { value: AccessRequestRole; label: string }[] = [
+  { value: "collector", label: "Collector" },
+  { value: "site_manager", label: "Site manager" },
+  { value: "recycler", label: "Recycler" },
+];
 
 export default function RequestAccessScreen() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState<"collector" | "site_manager" | "recycler">("collector");
+  const [role, setRole] = useState<AccessRequestRole>("collector");
   const [siteName, setSiteName] = useState("");
   const [referralSource, setReferralSource] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -85,17 +96,44 @@ export default function RequestAccessScreen() {
         onChangeText={setPhone}
         placeholder="+254712345678"
       />
-      <Field
-        label="Role interested in"
-        value={role}
-        onChangeText={(text) => {
-          const nextRole = text as "collector" | "site_manager" | "recycler";
-          if (["collector", "site_manager", "recycler"].includes(nextRole)) {
-            setRole(nextRole);
-          }
-        }}
-        placeholder="collector"
-      />
+      <View style={styles.roleField}>
+        <Text nativeID="role-label" style={styles.roleLabel}>
+          Role interested in
+        </Text>
+        <View
+          accessibilityLabelledBy="role-label"
+          accessibilityRole="radiogroup"
+          style={styles.roleOptions}
+        >
+          {ROLE_OPTIONS.map((option) => {
+            const selected = role === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityLabel={option.label}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected, disabled: loading }}
+                disabled={loading}
+                onPress={() => setRole(option.value)}
+                style={({ pressed }) => [
+                  styles.roleOption,
+                  selected ? styles.roleOptionSelected : null,
+                  pressed && !selected ? styles.roleOptionPressed : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.roleOptionText,
+                    selected ? styles.roleOptionTextSelected : null,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
       <Field
         label="Site name or area"
         value={siteName}
@@ -119,3 +157,46 @@ export default function RequestAccessScreen() {
     </Screen>
   );
 }
+
+// Matches the Field label and input styling in src/components/Ui.tsx.
+const styles = StyleSheet.create({
+  roleField: {
+    gap: 7,
+  },
+  roleLabel: {
+    color: uiColors.text,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  roleOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  roleOption: {
+    alignItems: "center",
+    backgroundColor: uiColors.white,
+    borderColor: uiColors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexGrow: 1,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: 14,
+  },
+  roleOptionSelected: {
+    backgroundColor: uiColors.primary,
+    borderColor: uiColors.primary,
+  },
+  roleOptionPressed: {
+    opacity: 0.85,
+  },
+  roleOptionText: {
+    color: uiColors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  roleOptionTextSelected: {
+    color: uiColors.white,
+  },
+});

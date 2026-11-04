@@ -185,12 +185,12 @@ export async function updateAccessRequestStatus(
     } as const;
   }
 
+  // Admins may only update status and notes. reviewed_by and reviewed_at
+  // are set by the database (access_requests_set_reviewer trigger).
   const { data, error } = await supabase
     .from("access_requests")
     .update({
       status,
-      reviewed_by: userData.user.id,
-      reviewed_at: new Date().toISOString(),
       notes: notes?.trim() || null,
     })
     .eq("id", id)

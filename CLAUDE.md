@@ -57,9 +57,15 @@ Do not introduce another backend or replace the stack without explicit discussio
 - `.env.example` references a different project ref than takalex-development.
 - README mentions Chemolex, 6 sites, SME groups and Mapbox — not in the current brief; defer.
 
+## Migration policy
+- Before the first database deployment, existing migrations (currently 001–004) may be edited in place while the schema is still under development.
+- Before editing an existing migration, verify that it has not been applied to any relevant local or remote database.
+- Once the first migration is deployed to takalex-development, freeze all existing migration files permanently.
+- After that first deployment, every schema change must be introduced through a new migration. Never edit or rewrite an applied migration.
+
 ## Layout
 - apps/mobile/src/app — Expo Router routes: public pages, (auth), (collector), (admin), auth/callback
 - apps/mobile/src/stores/authStore.ts — Zustand auth state
 - apps/mobile/src/lib — supabase client, secure storage, access/sites helpers
-- supabase/migrations — 001..003 (not yet deployed; editable until first deploy, then frozen)
+- supabase/migrations — 001..004; editing rules in "Migration policy" above
 - supabase/functions/invite-collector — admin invite Edge Function
