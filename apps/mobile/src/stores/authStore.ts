@@ -6,6 +6,8 @@ import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { profileSchema, type Profile } from "@/types/auth";
 
+type InviteRole = Exclude<Profile["role"], "admin">;
+
 type AuthState = {
   session: Session | null;
   user: User | null;
@@ -29,7 +31,12 @@ type AuthState = {
   acceptInvitation: (password: string, phone?: string) => Promise<void>;
   verifyPhoneChange: (phone: string, token: string) => Promise<void>;
   finishInvitationWithoutPhone: () => Promise<void>;
-  inviteCollector: (email: string, fullName: string) => Promise<void>;
+  inviteCollector: (
+    email: string,
+    fullName: string,
+    role: InviteRole,
+    siteIds: string[],
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   setInvitationPending: (pending: boolean) => void;
   setAuthError: (message: string | null) => void;
@@ -47,7 +54,7 @@ async function loadProfile(session: Session): Promise<void> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, phone, role, site_id, group_id, is_active, created_at")
+    .select("id, full_name, phone, role, group_id, is_active, created_at")
     .eq("id", session.user.id)
     .maybeSingle();
 
@@ -68,6 +75,7 @@ async function loadProfile(session: Session): Promise<void> {
   }
 
   const result = profileSchema.safeParse(data);
+
   if (!result.success) {
     useAuthStore.setState({
       session,
@@ -118,10 +126,13 @@ export const useAuthStore = create<AuthState>()(
       pendingPhone: null,
       authError: null,
       statusMessage: null,
+
       setIsHydrated: () => set({ isHydrated: true }),
+
       initialize: async () => {
         try {
           const { data, error } = await supabase.auth.getSession();
+
           if (error) {
             set({
               session: null,
@@ -133,10 +144,14 @@ export const useAuthStore = create<AuthState>()(
             });
             return;
           }
+
           await get().loadSession(data.session);
         } catch (error: unknown) {
           const message =
-            error instanceof Error ? error.message : "Secure session storage is unavailable.";
+            error instanceof Error
+              ? error.message
+              : "Secure session storage is unavailable.";
+
           set({
             session: null,
             user: null,
@@ -147,6 +162,7 @@ export const useAuthStore = create<AuthState>()(
           });
         }
       },
+
       loadSession: async (session) => {
         if (!session) {
           set({
@@ -163,14 +179,17 @@ export const useAuthStore = create<AuthState>()(
           });
           return;
         }
+
         try {
           await loadProfile(session);
         } catch (error: unknown) {
           if (get().session?.user.id !== session.user.id) {
             return;
           }
+
           const message =
             error instanceof Error ? error.message : "The profile request failed.";
+
           set({
             session,
             user: session.user,
@@ -181,19 +200,24 @@ export const useAuthStore = create<AuthState>()(
           });
         }
       },
+
       setSession: (session) =>
         set({ session, user: session?.user ?? null }),
+
       signInWithPassword: async (email, password) => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
             email,
             password,
           });
+
           if (error) {
             set({ isLoading: false, authError: error.message });
             return;
           }
+
           await get().loadSession(data.session);
         } catch (error: unknown) {
           set({
@@ -203,13 +227,16 @@ export const useAuthStore = create<AuthState>()(
           });
         }
       },
+
       requestPhoneOtp: async (phone) => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { error } = await supabase.auth.signInWithOtp({
             phone,
             options: { shouldCreateUser: false },
           });
+
           set({
             isLoading: false,
             authError: error?.message ?? null,
@@ -221,42 +248,53 @@ export const useAuthStore = create<AuthState>()(
           set({
             isLoading: false,
             authError:
-              error instanceof Error ? error.message : "Could not send an SMS code.",
+              error instanceof Error
+                ? error.message
+                : "Could not send an SMS code.",
           });
         }
       },
+
       verifyPhoneOtp: async (phone, token) => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { data, error } = await supabase.auth.verifyOtp({
             phone,
             token,
             type: "sms",
           });
+
           if (error) {
             set({ isLoading: false, authError: error.message });
             return;
           }
+
           await get().loadSession(data.session);
         } catch (error: unknown) {
           set({
             isLoading: false,
             authError:
-              error instanceof Error ? error.message : "Could not verify the SMS code.",
+              error instanceof Error
+                ? error.message
+                : "Could not verify the SMS code.",
           });
         }
       },
+
       acceptInvitation: async (password, phone) => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { error } = await supabase.auth.updateUser({
             password,
             ...(phone ? { phone } : {}),
           });
+
           if (error) {
-            set({ isLoading: false, authError: error.message });
-            return;
+            throw error;
           }
+
           if (phone) {
             set({
               isLoading: false,
@@ -266,80 +304,155 @@ export const useAuthStore = create<AuthState>()(
             });
             return;
           }
-          set({ invitationPending: false });
+
+          const { error: acceptanceError } = await supabase.rpc(
+            "accept_my_invitation",
+          );
+
+          if (acceptanceError) {
+            throw acceptanceError;
+          }
+
+          set({
+            invitationPending: false,
+            phoneOtpPending: false,
+            pendingPhone: null,
+            isLoading: false,
+            authError: null,
+            statusMessage: "Your invitation has been accepted.",
+          });
+
           await get().loadSession(get().session);
         } catch (error: unknown) {
           set({
             isLoading: false,
             authError:
-              error instanceof Error ? error.message : "Could not save your account.",
+              error instanceof Error
+                ? error.message
+                : "Could not complete your invitation.",
           });
         }
       },
+
       verifyPhoneChange: async (phone, token) => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { data, error } = await supabase.auth.verifyOtp({
             phone,
             token,
             type: "phone_change",
           });
+
           if (error) {
-            set({ isLoading: false, authError: error.message });
-            return;
+            throw error;
           }
+
+          const { error: acceptanceError } = await supabase.rpc(
+            "accept_my_invitation",
+          );
+
+          if (acceptanceError) {
+            throw acceptanceError;
+          }
+
           set({
             invitationPending: false,
             phoneOtpPending: false,
             pendingPhone: null,
-            statusMessage: "Phone number verified. You can now sign in with SMS.",
+            isLoading: false,
+            authError: null,
+            statusMessage: "Invitation accepted and phone number verified.",
           });
+
           await get().loadSession(data.session);
         } catch (error: unknown) {
           set({
             isLoading: false,
             authError:
-              error instanceof Error ? error.message : "Could not verify the phone number.",
+              error instanceof Error
+                ? error.message
+                : "Could not verify the phone number.",
           });
         }
       },
+
       finishInvitationWithoutPhone: async () => {
-        set({
-          invitationPending: false,
-          phoneOtpPending: false,
-          pendingPhone: null,
-          authError: null,
-          statusMessage: null,
-        });
-        await get().loadSession(get().session);
+        set({ isLoading: true, authError: null, statusMessage: null });
+
+        try {
+          const { error } = await supabase.rpc("accept_my_invitation");
+
+          if (error) {
+            throw error;
+          }
+
+          set({
+            invitationPending: false,
+            phoneOtpPending: false,
+            pendingPhone: null,
+            isLoading: false,
+            authError: null,
+            statusMessage: "Your invitation has been accepted.",
+          });
+
+          await get().loadSession(get().session);
+        } catch (error: unknown) {
+          set({
+            isLoading: false,
+            authError:
+              error instanceof Error
+                ? error.message
+                : "Could not complete your invitation.",
+          });
+        }
       },
-      inviteCollector: async (email, fullName) => {
+
+      inviteCollector: async (email, fullName, role, siteIds) => {
         set({ isInviting: true, authError: null, statusMessage: null });
+
         try {
           const { error } = await supabase.functions.invoke("invite-collector", {
-            body: { email, fullName },
+            body: {
+              email,
+              fullName,
+              role,
+              siteIds,
+            },
           });
+
+          if (error) {
+            throw error;
+          }
+
           set({
             isInviting: false,
-            authError: error?.message ?? null,
-            statusMessage: error ? null : `Invitation sent to ${email}.`,
+            authError: null,
+            statusMessage: `Invitation sent to ${email}.`,
           });
         } catch (error: unknown) {
           set({
             isInviting: false,
             authError:
-              error instanceof Error ? error.message : "Could not send the invitation.",
+              error instanceof Error
+                ? error.message
+                : "Could not send the invitation.",
+            statusMessage: null,
           });
         }
       },
+
       signOut: async () => {
         set({ isLoading: true, authError: null, statusMessage: null });
+
         try {
           const { error } = await supabase.auth.signOut({ scope: "local" });
+
           if (error) {
             set({ isLoading: false, authError: error.message });
             return;
           }
+
           set({
             session: null,
             user: null,
@@ -350,14 +463,17 @@ export const useAuthStore = create<AuthState>()(
             phoneOtpPending: false,
             pendingPhone: null,
             authError: null,
+            statusMessage: null,
           });
         } catch (error: unknown) {
           set({
             isLoading: false,
-            authError: error instanceof Error ? error.message : "Could not sign out.",
+            authError:
+              error instanceof Error ? error.message : "Could not sign out.",
           });
         }
       },
+
       setInvitationPending: (pending) => set({ invitationPending: pending }),
       setAuthError: (message) => set({ authError: message }),
       clearStatusMessage: () => set({ statusMessage: null }),
@@ -375,9 +491,14 @@ export const useAuthStore = create<AuthState>()(
       onRehydrateStorage: () => (state, error) => {
         if (error) {
           const message =
-            error instanceof Error ? error.message : "Secure storage could not be read.";
-          state?.setAuthError(`Could not restore saved account information: ${message}`);
+            error instanceof Error
+              ? error.message
+              : "Secure storage could not be read.";
+          state?.setAuthError(
+            `Could not restore saved account information: ${message}`,
+          );
         }
+
         state?.setIsHydrated();
       },
     },
