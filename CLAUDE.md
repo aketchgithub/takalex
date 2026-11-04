@@ -54,16 +54,20 @@ Do not introduce another backend or replace the stack without explicit discussio
 ## Known issues found in review (pushed commit ac7c20e)
 - CI runs `npm test` but no test script exists; typecheck not in CI; EAS job lacks eas.json.
 - `.env.example` references a different project ref than takalex-development.
-- PostgreSQL's built-in PUBLIC EXECUTE default on new functions is not overridden; every new
-  function must REVOKE/GRANT explicitly beside its definition, and 60_privileges fails if one
-  doesn't.
-- README mentions Chemolex, 6 sites, SME groups and Mapbox — not in the current brief; defer.
+- README mentions 6 sites, SME groups and Mapbox; the agreed brief has 9 sites and no SME groups or maps. Confirm with Chemolex before building them.
 
 ## Migration policy
 - Before the first database deployment, existing migrations (currently 001–004) may be edited in place while the schema is still under development.
 - Before editing an existing migration, verify that it has not been applied to any relevant local or remote database.
 - Once the first migration is deployed to takalex-development, freeze all existing migration files permanently.
 - After that first deployment, every schema change must be introduced through a new migration. Never edit or rewrite an applied migration.
+
+## Privilege rules
+- PostgreSQL's built-in PUBLIC EXECUTE default on new functions is not overridden; every new
+  function must REVOKE/GRANT explicitly beside its definition, and 60_privileges fails if one
+  doesn't.
+- Edge Functions using service_role must select explicit columns and use return-minimal
+  updates; `select('*')` and bare `.select()` are denied on invitations and access_requests.
 
 ## Layout
 - apps/mobile/src/app — Expo Router routes: public pages, (auth), (collector), (admin), auth/callback
