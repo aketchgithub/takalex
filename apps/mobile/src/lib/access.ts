@@ -10,23 +10,94 @@ export const accessRequestStatusSchema = z.enum([
   "rejected",
 ]);
 
+export const accessRequestRoleSchema = z.enum([
+  "collector",
+  "site_manager",
+  "recycler",
+]);
+
+// Mirrors access_request_phone_format in
+// supabase/migrations/003_public_access_flow.sql: optional leading "+",
+// then digits, spaces, parentheses or hyphens; 7 to 15 digits; max 32 chars.
+// Accepts 0712345678, 0110123456, +254712345678, 254712345678,
+// +254 712 345 678 and 0712-345-678.
+const PHONE_ALLOWED_CHARACTERS = /^\+?[0-9 ()-]+$/;
+const PHONE_MIN_DIGITS = 7;
+const PHONE_MAX_DIGITS = 15;
+
+function countDigits(value: string): number {
+  return value.replace(/[^0-9]/g, "").length;
+}
+
+// An empty string means "not provided"; the payload sends null instead.
+const phoneSchema = z
+  .string()
+  .trim()
+  .max(32, "Phone number is too long.")
+  .refine(
+    (value) => value === "" || PHONE_ALLOWED_CHARACTERS.test(value),
+    "Phone numbers may only contain digits, spaces, brackets, hyphens and a leading +.",
+  )
+  .refine(
+    (value) => {
+      if (value === "") {
+        return true;
+      }
+
+      const digits = countDigits(value);
+      return digits >= PHONE_MIN_DIGITS && digits <= PHONE_MAX_DIGITS;
+    },
+    "Phone number must contain between 7 and 15 digits, for example 0712345678 or +254712345678.",
+  );
+
+// Length matches the database (254). The format check is the standard
+// email check, which is stricter than the database's basic shape check.
+const emailSchema = z
+  .string()
+  .trim()
+  .max(254, "Email address is too long.")
+  .refine(
+    (value) => value === "" || z.email().safeParse(value).success,
+    "Enter a valid email address.",
+  );
+
+// Used by both the request form and submitAccessRequest so they always agree.
+// Lengths mirror the access_requests CHECK constraints.
 export const submitAccessRequestSchema = z.object({
-  full_name: z.string().trim().min(2, "Enter the applicant's full name."),
-  email: z.string().trim().email("Enter a valid email address. ").optional().or(z.literal("")),
-  phone: z.string().trim().regex(/^\+?[1-9]\d{7,14}$/, "Use an international phone number, for example +254712345678. ").optional().or(z.literal("")),
-  role: z.enum(["collector", "admin", "recycler"]).default("collector"),
-  site_name: z.string().trim().max(120, "Site name is too long.").optional().or(z.literal("")),
-  referral_source: z.string().trim().max(200, "Referral source is too long.").optional().or(z.literal("")),
-});
+  full_name: z
+    .string()
+    .trim()
+    .min(2, "Enter your full name.")
+    .max(150, "Name must be 150 characters or fewer."),
+  email: emailSchema.optional(),
+  phone: phoneSchema.optional(),
+  role: accessRequestRoleSchema.default("collector"),
+  site_name: z
+    .string()
+    .trim()
+    .max(120, "Site name is too long.")
+    .optional()
+    .or(z.literal("")),
+  referral_source: z
+    .string()
+    .trim()
+    .max(200, "Referral source is too long.")
+    .optional()
+    .or(z.literal("")),
+}).refine(
+  (data) => Boolean(data.email?.trim() || data.phone?.trim()),
+  { message: "Provide an email address or phone number." },
+);
 
 export type AccessRequestStatus = z.infer<typeof accessRequestStatusSchema>;
+export type AccessRequestRole = z.infer<typeof accessRequestRoleSchema>;
 
 export type AccessRequestRecord = {
   id: string;
   full_name: string;
   email: string | null;
   phone: string | null;
-  role: "collector" | "admin" | "recycler";
+  role: AccessRequestRole;
   site_name: string | null;
   referral_source: string | null;
   status: AccessRequestStatus;
@@ -36,15 +107,29 @@ export type AccessRequestRecord = {
   notes: string | null;
 };
 
-export async function submitAccessRequest(input: z.input<typeof submitAccessRequestSchema>) {
+export type SubmitAccessRequestResult = {
+  error: { message: string } | null;
+};
+
+// Anonymous users have INSERT on a limited set of columns and no SELECT on
+// access_requests, so the row is inserted without reading it back
+// (no .select()). Success is the absence of an error.
+export async function submitAccessRequest(
+  input: z.input<typeof submitAccessRequestSchema>,
+): Promise<SubmitAccessRequestResult> {
   const parsed = submitAccessRequestSchema.safeParse(input);
+
   if (!parsed.success) {
     return {
-      data: null,
-      error: { message: parsed.error.issues[0]?.message ?? "Request could not be submitted." },
-    } as const;
+      error: {
+        message: parsed.error.issues[0]?.message
+          ?? "Request could not be submitted.",
+      },
+    };
   }
 
+  // Only columns granted to anon may be sent. status, reviewer fields,
+  // notes, id and created_at are set by the database.
   const payload = {
     full_name: parsed.data.full_name,
     email: parsed.data.email?.trim() || null,
@@ -52,12 +137,29 @@ export async function submitAccessRequest(input: z.input<typeof submitAccessRequ
     role: parsed.data.role,
     site_name: parsed.data.site_name?.trim() || null,
     referral_source: parsed.data.referral_source?.trim() || null,
-    status: "submitted" as const,
   };
 
-  const { data, error } = await supabase.from("access_requests").insert(payload).select().single();
+  const { error } = await supabase.from("access_requests").insert(payload);
 
-  return { data, error };
+  if (!error) {
+    return { error: null };
+  }
+
+  // Do not show raw database messages to public users.
+  if (error.code === "23514") {
+    return {
+      error: {
+        message:
+          "Some details could not be accepted. Check your name, email address and phone number.",
+      },
+    };
+  }
+
+  return {
+    error: {
+      message: "Your request could not be submitted. Please try again later.",
+    },
+  };
 }
 
 export async function getAccessRequests() {
@@ -76,43 +178,24 @@ export async function updateAccessRequestStatus(
 ) {
   const { data: userData } = await supabase.auth.getUser();
 
+  if (!userData.user) {
+    return {
+      data: null,
+      error: { message: "You must sign in to review access requests." },
+    } as const;
+  }
+
   const { data, error } = await supabase
     .from("access_requests")
     .update({
       status,
-      reviewed_by: userData.user?.id ?? null,
+      reviewed_by: userData.user.id,
       reviewed_at: new Date().toISOString(),
       notes: notes?.trim() || null,
     })
     .eq("id", id)
     .select()
     .single();
-
-  return { data, error };
-}
-
-export async function createInvitationForRequest(
-  accessRequest: Pick<AccessRequestRecord, "email" | "phone" | "full_name" | "role" | "site_name">,
-) {
-  if (!accessRequest.email && !accessRequest.phone) {
-    return {
-      data: null,
-      error: { message: "An email or phone number is required to create an invitation." },
-    } as const;
-  }
-
-  const { data: userData } = await supabase.auth.getUser();
-  const payload = {
-    email: accessRequest.email || null,
-    phone: accessRequest.phone || null,
-    invited_by: userData.user?.id ?? null,
-    role: accessRequest.role,
-    site_name: accessRequest.site_name || null,
-    status: "pending",
-    token: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  };
-
-  const { data, error } = await supabase.from("invitations").insert(payload).select().single();
 
   return { data, error };
 }

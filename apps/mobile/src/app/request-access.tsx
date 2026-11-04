@@ -1,24 +1,14 @@
 import { useState } from "react";
 import { router } from "expo-router";
-import { z } from "zod";
 
 import { Field, Message, PrimaryButton, Screen } from "@/components/Ui";
-import { submitAccessRequest } from "@/lib/access";
-
-const requestSchema = z.object({
-  full_name: z.string().trim().min(2, "Enter your full name."),
-  email: z.string().trim().email("Enter a valid email address.").optional().or(z.literal("")),
-  phone: z.string().trim().regex(/^\+?[1-9]\d{7,14}$/, "Use an international phone number, for example +254712345678.").optional().or(z.literal("")),
-  role: z.enum(["collector", "admin", "recycler"]).default("collector"),
-  site_name: z.string().trim().max(120, "Site name is too long.").optional().or(z.literal("")),
-  referral_source: z.string().trim().max(200, "Referral source is too long.").optional().or(z.literal("")),
-});
+import { submitAccessRequest, submitAccessRequestSchema } from "@/lib/access";
 
 export default function RequestAccessScreen() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState<"collector" | "admin" | "recycler">("collector");
+  const [role, setRole] = useState<"collector" | "site_manager" | "recycler">("collector");
   const [siteName, setSiteName] = useState("");
   const [referralSource, setReferralSource] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +16,9 @@ export default function RequestAccessScreen() {
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    const parsed = requestSchema.safeParse({
+    // Same schema submitAccessRequest uses, including the
+    // "email or phone required" rule, so the form and submission agree.
+    const parsed = submitAccessRequestSchema.safeParse({
       full_name: fullName,
       email,
       phone,
@@ -41,17 +33,11 @@ export default function RequestAccessScreen() {
       return;
     }
 
-    if (!parsed.data.email && !parsed.data.phone) {
-      setError("Provide either an email address or a phone number.");
-      setStatus(null);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setStatus(null);
 
-    const { data, error: submitError } = await submitAccessRequest(parsed.data);
+    const { error: submitError } = await submitAccessRequest(parsed.data);
 
     setLoading(false);
 
@@ -61,9 +47,7 @@ export default function RequestAccessScreen() {
     }
 
     setStatus(
-      data
-        ? "Your request has been submitted. An administrator will review it and send an invite if approved."
-        : "Your request has been submitted. An administrator will review it shortly.",
+      "Your request has been submitted. An administrator will review it and send an invite if approved.",
     );
     setFullName("");
     setEmail("");
@@ -105,8 +89,8 @@ export default function RequestAccessScreen() {
         label="Role interested in"
         value={role}
         onChangeText={(text) => {
-          const nextRole = text as "collector" | "admin" | "recycler";
-          if (["collector", "admin", "recycler"].includes(nextRole)) {
+          const nextRole = text as "collector" | "site_manager" | "recycler";
+          if (["collector", "site_manager", "recycler"].includes(nextRole)) {
             setRole(nextRole);
           }
         }}
