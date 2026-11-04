@@ -42,8 +42,10 @@ Do not introduce another backend or replace the stack without explicit discussio
 - Payment gateway / M-Pesa is out of scope; only record eligibility/status.
 
 ## Invitations
-- Admin-only, via Edge Function. 7-day expiry. Reissue for expired invitations of
-  unconfirmed, inactive users only; atomic DB changes; old invitation can never be accepted.
+- Admin-only, via Edge Function. 7-day expiry. Atomic DB changes; old invitation can
+  never be accepted.
+- Reissue requires an inactive profile and no accepted invitation. Email confirmation
+  is not the test, because a failed acceptance can leave a confirmed but inactive user.
 - Do NOT assume `auth.admin.generateLink({ type: "invite" })` or `inviteUserByEmail`
   works for an existing Auth user — verify empirically on the local stack first.
 - Supabase's built-in email only reaches project team members. Real invites need
