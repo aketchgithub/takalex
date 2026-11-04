@@ -439,20 +439,31 @@ BEGIN
   PERFORM t.pass('admin cannot set reviewer fields, identity, contact, role, created_at or id; row unchanged');
 END $$;
 
--- 17
+-- 17 (service_role has UPDATE on status only, so forged reviewer values
+-- are denied outright; a status update keeps the previous reviewer)
 DO $$
-DECLARE r public.access_requests;
+DECLARE r public.access_requests; c TEXT;
 BEGIN
+  FOREACH c IN ARRAY ARRAY['reviewed_by', 'reviewed_at', 'notes'] LOOP
+    BEGIN
+      PERFORM t.become('service_role');
+      EXECUTE format('UPDATE public.access_requests SET status = ''invited'', %I = %s WHERE id = %L',
+        c, CASE c WHEN 'reviewed_by' THEN quote_literal(t.id('collector'))
+                  WHEN 'reviewed_at' THEN '''2000-01-01''' ELSE '''forged''' END,
+        t.id('noreadback'));
+      RAISE EXCEPTION 'service_role could set %', c;
+    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    END;
+  END LOOP;
   PERFORM t.become('service_role');
-  UPDATE public.access_requests
-  SET status = 'invited', reviewed_by = t.id('collector'), reviewed_at = '2000-01-01'
-  WHERE id = t.id('noreadback');
+  UPDATE public.access_requests SET status = 'invited' WHERE id = t.id('noreadback');
   PERFORM t.become('postgres');
   SELECT * INTO STRICT r FROM public.access_requests WHERE id = t.id('noreadback');
   ASSERT r.status = 'invited';
   ASSERT r.reviewed_by = t.id('admin_b'), 'service_role update replaced the reviewer';
-  ASSERT r.reviewed_at = now(), 'service_role forged reviewed_at kept';
-  PERFORM t.pass('service_role update keeps the previous reviewer and ignores forged reviewer values');
+  ASSERT r.reviewed_at = now(), 'reviewed_at not stamped';
+  ASSERT r.notes = 'Second look', 'notes changed';
+  PERFORM t.pass('service_role: forged reviewer/notes denied; status update keeps the previous reviewer and stamps reviewed_at');
 END $$;
 
 -- 18

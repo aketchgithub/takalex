@@ -24,7 +24,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.handle_new_auth_user() FROM PUBLIC;
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.handle_new_auth_user()
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -51,7 +53,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.sync_auth_user_profile() FROM PUBLIC;
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.sync_auth_user_profile()
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER on_auth_user_profile_updated
   AFTER UPDATE OF phone, raw_user_meta_data ON auth.users

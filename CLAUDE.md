@@ -54,8 +54,9 @@ Do not introduce another backend or replace the stack without explicit discussio
 ## Known issues found in review (pushed commit ac7c20e)
 - CI runs `npm test` but no test script exists; typecheck not in CI; EAS job lacks eas.json.
 - `.env.example` references a different project ref than takalex-development.
-- service_role lacks grants on invitations/access_requests (Edge Function reads will fail).
-- Functions are revoked only from PUBLIC; revoke EXECUTE from anon/authenticated explicitly.
+- PostgreSQL's built-in PUBLIC EXECUTE default on new functions is not overridden; every new
+  function must REVOKE/GRANT explicitly beside its definition, and 60_privileges fails if one
+  doesn't.
 - README mentions Chemolex, 6 sites, SME groups and Mapbox — not in the current brief; defer.
 
 ## Migration policy

@@ -31,6 +31,8 @@ CREATE TABLE public.sites (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+REVOKE ALL ON public.sites FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX sites_location_idx
   ON public.sites USING GIST (location);
 
@@ -45,6 +47,8 @@ CREATE TABLE public.profiles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+REVOKE ALL ON public.profiles FROM PUBLIC, anon, authenticated, service_role;
+
 -- GROUPS
 CREATE TABLE public.sme_groups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -53,6 +57,8 @@ CREATE TABLE public.sme_groups (
   leader_id UUID REFERENCES public.profiles(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+REVOKE ALL ON public.sme_groups FROM PUBLIC, anon, authenticated, service_role;
 
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_group_id_fkey
@@ -66,6 +72,8 @@ CREATE TABLE public.user_sites (
   assigned_by UUID REFERENCES public.profiles(id),
   PRIMARY KEY (user_id, site_id)
 );
+
+REVOKE ALL ON public.user_sites FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE INDEX user_sites_site_id_idx ON public.user_sites(site_id);
 
@@ -129,6 +137,8 @@ CREATE TABLE public.collection_logs (
   )
 );
 
+REVOKE ALL ON public.collection_logs FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX collection_logs_collector_idx
   ON public.collection_logs(collector_id);
 
@@ -153,6 +163,8 @@ CREATE TABLE public.collection_evidence (
   CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180)
 );
 
+REVOKE ALL ON public.collection_evidence FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX collection_evidence_collection_idx
   ON public.collection_evidence(collection_id);
 
@@ -167,6 +179,8 @@ CREATE TABLE public.collection_events (
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+REVOKE ALL ON public.collection_events FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE INDEX collection_events_collection_idx
   ON public.collection_events(collection_id, created_at);
@@ -192,7 +206,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.enforce_collection_insert() FROM PUBLIC;
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.enforce_collection_insert()
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER collection_logs_enforce_insert
   BEFORE INSERT ON public.collection_logs
@@ -228,7 +244,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.protect_collection_update() FROM PUBLIC;
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.protect_collection_update()
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER collection_logs_protect_update
   BEFORE UPDATE ON public.collection_logs
@@ -268,7 +286,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.record_collection_submitted() FROM PUBLIC;
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.record_collection_submitted()
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER collection_logs_record_submitted
   AFTER INSERT ON public.collection_logs
@@ -292,6 +312,11 @@ AS $$
   );
 $$;
 
+REVOKE ALL ON FUNCTION public.is_active_admin()
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_active_admin()
+  TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.is_active_site_member(p_site_id UUID)
 RETURNS BOOLEAN
 LANGUAGE SQL
@@ -308,6 +333,11 @@ AS $$
       AND us.site_id = p_site_id
   );
 $$;
+
+REVOKE ALL ON FUNCTION public.is_active_site_member(UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_active_site_member(UUID)
+  TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.can_review_site(p_site_id UUID)
 RETURNS BOOLEAN
@@ -329,13 +359,10 @@ AS $$
     );
 $$;
 
-REVOKE ALL ON FUNCTION public.is_active_admin() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.is_active_site_member(UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.can_review_site(UUID) FROM PUBLIC;
-
-GRANT EXECUTE ON FUNCTION public.is_active_admin() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_active_site_member(UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.can_review_site(UUID) TO authenticated;
+REVOKE ALL ON FUNCTION public.can_review_site(UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.can_review_site(UUID)
+  TO authenticated;
 
 -- SERVER-SIDE COLLECTION REVIEW
 CREATE OR REPLACE FUNCTION public.review_collection(
@@ -428,8 +455,7 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.review_collection(UUID, BOOLEAN, NUMERIC, TEXT)
-  FROM PUBLIC;
-
+  FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.review_collection(UUID, BOOLEAN, NUMERIC, TEXT)
   TO authenticated;
 
@@ -564,11 +590,11 @@ CREATE POLICY events_read_permitted
   );
 
 -- TABLE PRIVILEGES
--- Remove any privileges added by default-privilege settings so the
--- column-level INSERT grant below is the only write path for clients.
-REVOKE ALL ON public.collection_logs FROM anon, authenticated;
-REVOKE ALL ON public.collection_events FROM anon, authenticated;
+-- Every table above starts with REVOKE ALL from PUBLIC, anon, authenticated
+-- and service_role, so these grants are the complete list, whatever the
+-- project's default privileges are. RLS policies then limit the rows.
 
+-- authenticated: read, limited by RLS.
 GRANT SELECT ON
   public.sites,
   public.profiles,
@@ -589,3 +615,27 @@ GRANT INSERT (
   captured_at
 ) ON public.collection_logs TO authenticated;
 GRANT INSERT ON public.collection_evidence TO authenticated;
+
+-- service_role (Edge Functions). It bypasses RLS, so these grants are its
+-- only limit. Read-only: every write goes through a SECURITY DEFINER RPC.
+--   profiles   - confirm the caller is an active admin; read an invitee's
+--                profile state before reissue/accept.
+--   sites      - validate requested site ids and name sites in emails.
+--   user_sites - read an invitee's current assignments for reissue/accept.
+-- Nothing on sme_groups, collection_logs, collection_evidence or
+-- collection_events: no Edge Function needs them.
+GRANT SELECT ON
+  public.profiles,
+  public.sites,
+  public.user_sites
+TO service_role;
+
+-- DEFAULT PRIVILEGES
+-- Removes schema-level default EXECUTE grants to anon, authenticated and
+-- service_role for functions this role creates later in public.
+-- It does NOT remove PostgreSQL's built-in PUBLIC EXECUTE default (a
+-- schema-scoped REVOKE cannot override it), so every new function must
+-- REVOKE/GRANT explicitly beside its definition; 60_privileges fails if one
+-- doesn't.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated, service_role;

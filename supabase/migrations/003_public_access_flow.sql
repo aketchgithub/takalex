@@ -58,6 +58,8 @@ CREATE TABLE public.access_requests (
     CHECK (role <> 'admin'::public.user_role)
 );
 
+REVOKE ALL ON public.access_requests FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX access_requests_status_idx ON public.access_requests(status);
 
 -- ADMIN-CREATED INVITATIONS
@@ -117,6 +119,8 @@ CREATE TABLE public.invitations (
     CHECK (superseded_by IS DISTINCT FROM id)
 );
 
+REVOKE ALL ON public.invitations FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX invitations_status_idx ON public.invitations(status);
 CREATE INDEX invitations_expiry_idx ON public.invitations(expires_at);
 CREATE INDEX invitations_auth_user_id_idx ON public.invitations(auth_user_id);
@@ -174,8 +178,9 @@ BEGIN
 END;
 $$;
 
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
 REVOKE ALL ON FUNCTION public.set_access_request_reviewer()
-  FROM PUBLIC, anon, authenticated;
+  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER access_requests_set_reviewer
   BEFORE UPDATE ON public.access_requests
@@ -187,9 +192,9 @@ CREATE POLICY admin_view_invitations
   FOR SELECT TO authenticated
   USING (public.is_active_admin());
 
--- Remove any privileges added by default-privilege settings so the
--- column-level INSERT grant below is the only public write path.
-REVOKE ALL ON public.access_requests FROM anon, authenticated;
+-- TABLE PRIVILEGES
+-- Both tables start with REVOKE ALL from PUBLIC, anon, authenticated and
+-- service_role (next to CREATE TABLE), so these grants are the complete list.
 
 -- Public submissions may only supply these columns. id, status, created_at,
 -- reviewed_by, reviewed_at and notes always come from defaults or admins.
@@ -210,10 +215,28 @@ GRANT INSERT (
 GRANT SELECT ON public.access_requests TO authenticated;
 GRANT UPDATE (status, notes) ON public.access_requests TO authenticated;
 
--- Invitations: no direct writes for anon or authenticated. Admins read rows
--- through admin_view_invitations, but never code_hash. Because this is a
--- column-level grant, clients must list columns (SELECT * is denied).
-REVOKE ALL ON public.invitations FROM anon, authenticated;
+-- service_role (Edge Functions; bypasses RLS, so this is its only limit):
+-- read the fields needed to turn a request into an invitation, and mark it
+-- 'invited' afterwards. id is needed to target the UPDATE. reviewed_by and
+-- reviewed_at are still set by the trigger (trigger-written columns need no
+-- column privilege). No notes, no INSERT/DELETE.
+GRANT SELECT (
+  id,
+  full_name,
+  email,
+  phone,
+  role,
+  site_name,
+  status
+) ON public.access_requests TO service_role;
+GRANT UPDATE (status) ON public.access_requests TO service_role;
+
+-- Invitations: no direct writes for anyone; all changes go through the
+-- SECURITY DEFINER functions below. Admins read rows through
+-- admin_view_invitations, and the Edge Functions (service_role) read them to
+-- check for an existing pending invitation. Neither can read code_hash: the
+-- definer functions read it themselves. Because these are column-level
+-- grants, callers must list columns (SELECT * is denied).
 GRANT SELECT (
   id,
   auth_user_id,
@@ -228,7 +251,7 @@ GRANT SELECT (
   revoked_at,
   revoked_by,
   superseded_by
-) ON public.invitations TO authenticated;
+) ON public.invitations TO authenticated, service_role;
 
 -- REGISTER AN INVITATION
 -- p_code_hash is the lowercase hex SHA-256 of the invitation code, computed
@@ -343,6 +366,15 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.register_invitation(
+  UUID, TEXT, TEXT, public.user_role, UUID[], UUID, TEXT
+)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.register_invitation(
+  UUID, TEXT, TEXT, public.user_role, UUID[], UUID, TEXT
+)
+  TO service_role;
+
 -- VERIFY AN INVITATION CODE
 -- Always returns exactly one row. On success: (TRUE, invitation id, Auth
 -- user id). On any failure (unknown email, wrong code, expired, locked,
@@ -398,6 +430,11 @@ BEGIN
   RETURN QUERY SELECT TRUE, v_id, v_auth_user_id;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
+  TO service_role;
 
 -- CONSUME A VERIFIED INVITATION
 -- Called by the Edge Function after verify_invitation_code succeeds and the
@@ -489,6 +526,11 @@ BEGIN
   RETURN p_invitation_id;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.consume_invitation(UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.consume_invitation(UUID)
+  TO service_role;
 
 -- REISSUE AN EXPIRED OR REVOKED INVITATION
 -- Atomic: the old row becomes 'superseded' (pointing at the new row), a new
@@ -637,6 +679,15 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.reissue_invitation(
+  UUID, UUID, TEXT, TEXT, public.user_role, UUID[]
+)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.reissue_invitation(
+  UUID, UUID, TEXT, TEXT, public.user_role, UUID[]
+)
+  TO service_role;
+
 -- REVOKE A PENDING INVITATION
 -- Called directly by a signed-in admin (authenticated role). The revoking
 -- admin is always auth.uid(), never a parameter. Works on any pending row,
@@ -678,34 +729,7 @@ BEGIN
 END;
 $$;
 
--- FUNCTION EXECUTION PERMISSIONS
--- register, verify, consume and reissue: service role (Edge Functions) only.
--- revoke: signed-in users only; the function itself requires an active admin.
-REVOKE ALL ON FUNCTION public.register_invitation(
-  UUID, TEXT, TEXT, public.user_role, UUID[], UUID, TEXT
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.register_invitation(
-  UUID, TEXT, TEXT, public.user_role, UUID[], UUID, TEXT
-) TO service_role;
-
-REVOKE ALL ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
-  TO service_role;
-
-REVOKE ALL ON FUNCTION public.consume_invitation(UUID)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.consume_invitation(UUID)
-  TO service_role;
-
-REVOKE ALL ON FUNCTION public.reissue_invitation(
-  UUID, UUID, TEXT, TEXT, public.user_role, UUID[]
-) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.reissue_invitation(
-  UUID, UUID, TEXT, TEXT, public.user_role, UUID[]
-) TO service_role;
-
 REVOKE ALL ON FUNCTION public.revoke_invitation(UUID)
-  FROM PUBLIC, anon;
+  FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.revoke_invitation(UUID)
   TO authenticated;
