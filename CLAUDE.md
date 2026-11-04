@@ -53,10 +53,9 @@ Do not introduce another backend or replace the stack without explicit discussio
 
 ## Known issues found in review (pushed commit ac7c20e)
 - CI runs `npm test` but no test script exists; typecheck not in CI; EAS job lacks eas.json.
-- `access_requests` public INSERT policy is `WITH CHECK (true)` (anon can set status/role).
-- `sites` has RLS enabled but no read policy.
-- `collection_logs.total_payout` is generated from collector weight — must change.
 - `.env.example` references a different project ref than takalex-development.
+- service_role lacks grants on invitations/access_requests (Edge Function reads will fail).
+- Functions are revoked only from PUBLIC; revoke EXECUTE from anon/authenticated explicitly.
 - README mentions Chemolex, 6 sites, SME groups and Mapbox — not in the current brief; defer.
 
 ## Migration policy

@@ -512,3 +512,155 @@ DO $$ BEGIN
     'review events do not match collection state';
   PERFORM t.pass('audit trail: one submitted event per collection, one matching review event per reviewed collection');
 END $$;
+
+-- ============================================================ round 3 additions
+-- 19
+DO $$
+DECLARE v_ev UUID;
+BEGIN
+  SELECT id INTO STRICT v_ev FROM public.collection_events
+  WHERE collection_id = t.id('col_forged') AND action = 'submitted';
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    UPDATE public.collection_logs SET reported_weight_kg = 99 WHERE id = t.id('col_forged');
+    RAISE EXCEPTION 'collector UPDATE allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    UPDATE public.collection_logs SET status = 'approved' WHERE id = t.id('col_forged');
+    RAISE EXCEPTION 'collector status UPDATE allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    DELETE FROM public.collection_logs WHERE id = t.id('col_forged');
+    RAISE EXCEPTION 'collector DELETE allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    INSERT INTO public.collection_events (collection_id, actor_id, action)
+    VALUES (t.id('col_forged'), t.id('c1'), 'approved');
+    RAISE EXCEPTION 'collector event INSERT allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    UPDATE public.collection_events SET action = 'approved' WHERE id = v_ev;
+    RAISE EXCEPTION 'collector event UPDATE allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    DELETE FROM public.collection_events WHERE id = v_ev;
+    RAISE EXCEPTION 'collector event DELETE allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  ASSERT (SELECT status = 'pending' AND reported_weight_kg = 5
+          FROM public.collection_logs WHERE id = t.id('col_forged'));
+  ASSERT (SELECT action FROM public.collection_events WHERE id = v_ev) = 'submitted';
+  PERFORM t.pass('collector UPDATE/DELETE on collections and INSERT/UPDATE/DELETE on events are denied');
+END $$;
+
+-- 20
+DO $$
+DECLARE r public.collection_logs; e public.collection_events;
+BEGIN
+  SELECT * INTO STRICT r FROM public.collection_logs WHERE id = t.id('col_a');
+  SELECT * INTO STRICT e FROM public.collection_events
+  WHERE collection_id = r.id AND action = 'submitted';
+  ASSERT e.actor_id = r.collector_id;
+  ASSERT (e.details->>'site_id')::uuid = r.site_id, 'site_id';
+  ASSERT e.details->>'material' = r.material::text, 'material';
+  ASSERT (e.details->>'reported_weight_kg')::numeric = r.reported_weight_kg, 'weight';
+  ASSERT (e.details->>'captured_at')::timestamptz = r.captured_at, 'captured_at';
+  ASSERT (e.details->>'client_record_id')::uuid = r.client_record_id, 'client_record_id';
+  ASSERT e.details->>'new_status' = 'pending';
+  ASSERT e.created_at = r.submitted_at, 'event written in the insert transaction';
+  PERFORM t.pass('submitted event carries site, material, reported weight, captured_at and client_record_id');
+END $$;
+
+-- 21: service_role (Edge Function key) cannot rewrite a collection either.
+DO $$
+DECLARE v_pending UUID := t.id('col_forged'); v_reviewed UUID := t.id('col_a');
+BEGIN
+  BEGIN
+    PERFORM t.become('service_role');
+    UPDATE public.collection_logs SET reported_weight_kg = 50 WHERE id = v_pending;
+    RAISE EXCEPTION 'service_role changed the reported weight';
+  EXCEPTION
+    WHEN raise_exception THEN
+      ASSERT SQLERRM = 'Submitted collection details cannot be changed', SQLERRM;
+    WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM t.become('service_role');
+    UPDATE public.collection_logs SET verified_weight_kg = 500 WHERE id = v_reviewed;
+    RAISE EXCEPTION 'service_role changed a reviewed row';
+  EXCEPTION
+    WHEN raise_exception THEN
+      ASSERT SQLERRM = 'Reviewed collections cannot be changed', SQLERRM;
+    WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM t.become('service_role');
+    UPDATE public.collection_logs SET status = 'rejected', rejection_reason = 'late',
+      payment_eligible = false, verified_weight_kg = NULL
+    WHERE id = v_reviewed;
+    RAISE EXCEPTION 'service_role re-reviewed a row';
+  EXCEPTION
+    WHEN raise_exception THEN
+      ASSERT SQLERRM = 'Reviewed collections cannot be changed', SQLERRM;
+    WHEN insufficient_privilege THEN NULL;
+  END;
+  ASSERT (SELECT reported_weight_kg FROM public.collection_logs WHERE id = v_pending) = 5;
+  ASSERT (SELECT status = 'approved' AND verified_weight_kg = 11.75
+          FROM public.collection_logs WHERE id = v_reviewed);
+  PERFORM t.pass('service_role cannot change the reported weight or any field of a reviewed row');
+END $$;
+
+-- 22
+DO $$
+DECLARE a TEXT;
+BEGIN
+  FOREACH a IN ARRAY ARRAY['pending', 'deleted', 'edited', 'APPROVED', ''] LOOP
+    BEGIN
+      INSERT INTO public.collection_events (collection_id, actor_id, action)
+      VALUES (t.id('col_a'), t.id('m1'), a);
+      RAISE EXCEPTION 'event action "%" accepted', a;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  END LOOP;
+  BEGIN
+    INSERT INTO public.collection_events (collection_id, actor_id, action)
+    VALUES (t.id('col_a'), t.id('m1'), NULL);
+    RAISE EXCEPTION 'NULL event action accepted';
+  EXCEPTION WHEN not_null_violation THEN NULL;
+  END;
+  PERFORM t.pass('event action is limited to submitted/approved/rejected (even for the owner)');
+END $$;
+
+-- 23
+DO $$
+DECLARE
+  col TEXT;
+  v_insert TEXT[] := ARRAY['client_record_id', 'site_id', 'material', 'reported_weight_kg', 'captured_at'];
+BEGIN
+  FOR col IN SELECT attname FROM pg_attribute
+             WHERE attrelid = 'public.collection_logs'::regclass AND attnum > 0 AND NOT attisdropped LOOP
+    ASSERT has_column_privilege('authenticated', 'public.collection_logs', col, 'INSERT') = (col = ANY (v_insert)),
+      'authenticated INSERT on ' || col;
+    ASSERT NOT has_column_privilege('authenticated', 'public.collection_logs', col, 'UPDATE'),
+      'authenticated UPDATE on ' || col;
+    ASSERT has_column_privilege('authenticated', 'public.collection_logs', col, 'SELECT'),
+      'authenticated SELECT on ' || col;
+    ASSERT NOT has_column_privilege('anon', 'public.collection_logs', col, 'SELECT, INSERT, UPDATE, REFERENCES'),
+      'anon privilege on ' || col;
+  END LOOP;
+  ASSERT NOT has_table_privilege('authenticated', 'public.collection_logs', 'DELETE, TRUNCATE, TRIGGER');
+  ASSERT NOT has_table_privilege('anon', 'public.collection_logs', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE');
+  ASSERT has_table_privilege('authenticated', 'public.collection_events', 'SELECT');
+  ASSERT NOT has_table_privilege('authenticated', 'public.collection_events', 'INSERT, UPDATE, DELETE, TRUNCATE');
+  FOR col IN SELECT attname FROM pg_attribute
+             WHERE attrelid = 'public.collection_events'::regclass AND attnum > 0 AND NOT attisdropped LOOP
+    ASSERT NOT has_column_privilege('authenticated', 'public.collection_events', col, 'INSERT, UPDATE'),
+      'authenticated write on events.' || col;
+  END LOOP;
+  ASSERT NOT has_table_privilege('anon', 'public.collection_events', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE');
+  PERFORM t.pass('catalog: collectors INSERT exactly 5 columns, no UPDATE/DELETE; events read-only; anon nothing');
+END $$;
