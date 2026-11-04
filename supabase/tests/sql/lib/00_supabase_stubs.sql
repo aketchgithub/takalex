@@ -38,10 +38,13 @@ GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 
 -- Worst case for privileges: emulate Supabase's classic automatic exposure,
--- where new tables and functions in public are granted to the API roles by
--- default. The migrations must REVOKE explicitly to be safe here, so this
--- is stricter than a project with automatic exposure disabled.
+-- where new tables, sequences and functions in public are granted to the API
+-- roles by default (matches postgres's default ACLs on the local stack). The
+-- migrations must REVOKE explicitly to be safe here, so this is stricter
+-- than a project with automatic exposure disabled.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;

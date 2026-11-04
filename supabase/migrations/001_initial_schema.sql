@@ -639,3 +639,11 @@ TO service_role;
 -- doesn't.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated, service_role;
+-- Tables and sequences this role creates later in public get no grants for
+-- anon, authenticated or service_role (Supabase's local stack grants them
+-- ALL by default). PostgreSQL has no PUBLIC default for these, so this
+-- closes them fully; new objects still need explicit GRANTs.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE ALL ON TABLES FROM anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE ALL ON SEQUENCES FROM anon, authenticated, service_role;

@@ -459,3 +459,49 @@ BEGIN
     'matrix not clean after the probe';
   PERFORM t.pass('new function without grants: PUBLIC EXECUTE default documented; the matrix checks report it until REVOKE/GRANT is added');
 END $$;
+
+-- 15: tables and sequences created later by postgres in public get no
+-- privileges for PUBLIC, anon, authenticated or service_role (the
+-- ALTER DEFAULT PRIVILEGES ... ON TABLES / ON SEQUENCES in 001). Checked in
+-- the catalog and with a probe table and sequence in a rolled-back
+-- subtransaction.
+DO $$
+DECLARE
+  v_bad TEXT;
+  r TEXT;
+  p TEXT;
+BEGIN
+  PERFORM t.become('postgres');
+
+  SELECT string_agg(format('%s %s -> %s', pg_get_userbyid(d.defaclrole), d.defaclobjtype,
+                           pg_get_userbyid(a.grantee)), ', ') INTO v_bad
+  FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace,
+       aclexplode(d.defaclacl) a
+  WHERE n.nspname = 'public' AND pg_get_userbyid(d.defaclrole) = 'postgres'
+    AND d.defaclobjtype IN ('r', 'S')
+    AND (a.grantee = 0 OR pg_get_userbyid(a.grantee) IN ('anon', 'authenticated', 'service_role'));
+  ASSERT v_bad IS NULL, 'postgres default ACLs in public still grant tables/sequences to: ' || v_bad;
+
+  BEGIN
+    CREATE TABLE public.zz_default_privilege_probe_t (id INTEGER);
+    CREATE SEQUENCE public.zz_default_privilege_probe_s;
+    FOREACH r IN ARRAY ARRAY['public', 'anon', 'authenticated', 'service_role'] LOOP
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        ASSERT NOT has_table_privilege(r, 'public.zz_default_privilege_probe_t', p),
+          format('%s has %s on a new table by default', r, p);
+      END LOOP;
+      ASSERT NOT has_any_column_privilege(r, 'public.zz_default_privilege_probe_t', 'SELECT,INSERT,UPDATE,REFERENCES'),
+        format('%s has column privileges on a new table by default', r);
+      FOREACH p IN ARRAY ARRAY['USAGE', 'SELECT', 'UPDATE'] LOOP
+        ASSERT NOT has_sequence_privilege(r, 'public.zz_default_privilege_probe_s', p),
+          format('%s has %s on a new sequence by default', r, p);
+      END LOOP;
+    END LOOP;
+    RAISE EXCEPTION USING ERRCODE = 'T0001', MESSAGE = 'rollback';
+  EXCEPTION WHEN SQLSTATE 'T0001' THEN NULL;
+  END;
+
+  ASSERT to_regclass('public.zz_default_privilege_probe_t') IS NULL
+     AND to_regclass('public.zz_default_privilege_probe_s') IS NULL, 'probe table/sequence leaked';
+  PERFORM t.pass('new tables and sequences in public get no privileges for PUBLIC, anon, authenticated or service_role by default');
+END $$;
