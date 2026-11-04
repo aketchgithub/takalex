@@ -111,6 +111,27 @@ CREATE POLICY "collector_own_logs" ON collection_logs
   );
 ```
 
+#### Bootstrapping the first administrator
+
+Admins cannot be invited, and every new Auth user starts as an inactive collector. The first admin is therefore created manually, once per environment, by the database owner. Never store the admin's password or any other credential in this repository.
+
+1. **Create the Auth user.** In the Supabase Dashboard, go to Authentication → Users → Add user → Create new user, enter the email and a password, and tick **Auto Confirm User**. (Locally, use Supabase Studio in the same way.)
+2. **Check the profile exists.** The `on_auth_user_created` trigger creates it automatically. In the SQL Editor:
+   ```sql
+   SELECT p.id, p.role, p.is_active
+   FROM public.profiles AS p
+   JOIN auth.users AS u ON u.id = p.id
+   WHERE lower(u.email) = lower('admin@example.org');
+   ```
+3. **Promote the user.** In the SQL Editor (which runs as the database owner), or in psql connected as `postgres`:
+   ```sql
+   SELECT public.bootstrap_first_admin('admin@example.org');
+   ```
+   It refuses to run if any admin profile already exists, if the user's email is not confirmed, or if the user or their profile is missing. It cannot be called through the API, including with the service-role key.
+4. **Verify.** Re-run the query from step 2: it should show `role = admin` and `is_active = true`. Then sign in to the app with that account and confirm the admin screens load.
+
+Local development: `supabase db reset` also loads `supabase/seed.sql`, which adds nine placeholder sites (`TEST Site 1` to `TEST Site 9`) with fictional coordinates. They are not real Chemolex sites.
+
 ### Step 3: Auth Flow
 Build the AUTH screens: Login, Register (with role selection hidden; Admin creates Collector accounts via invite). Use Supabase Auth with email/password and phone OTP as fallback (important for informal waste pickers). Store the session in a Zustand store with persistence via `expo-secure-store`.
 

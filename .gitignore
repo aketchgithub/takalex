@@ -7,3 +7,6 @@ web-build/
 !.env.example
 supabase/.branches/
 supabase/.temp/
+
+# Claude Code personal settings
+.claude/settings.local.json

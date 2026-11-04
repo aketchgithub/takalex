@@ -12,7 +12,9 @@ port = 54322
 enabled = true
 
 [db.seed]
-enabled = false
+# Local development only: placeholder TEST sites (not real Chemolex sites).
+enabled = true
+sql_paths = ["./seed.sql"]
 
 [auth]
 additional_redirect_urls = ["takalex://auth/callback"]

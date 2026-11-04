@@ -1,0 +1,65 @@
+# Takalex — project rules for Claude Code
+
+Waste collection tracking and verification MVP for Chemolex (client: Owino Aketch).
+Developer: Cynthia Chepkemoi Langat. Four-week, fixed-scope engagement.
+Android-first. Stack: Expo + React Native + TypeScript (apps/mobile), Supabase
+(Postgres, Auth, Edge Functions, Storage), Expo SQLite for offline, Sentry, GitHub Actions.
+Do not introduce another backend or replace the stack without explicit discussion.
+
+## Hard rules — never break these
+- Never run `git push`, `git reset --hard`, `git clean`, `git checkout -- <file>`,
+  `git restore`, or drop/clear stashes. Uncommitted work on
+  `feat/takalex-database-foundation` is intentional and must be preserved.
+- Never deploy to the remote Supabase project (`omtmqtgmbtkutadbkjzv`):
+  no `supabase db push`, no `--linked` resets, no `functions deploy`, no `secrets set`.
+  Migrations are tested locally (`supabase start`, `supabase db reset`) and deployed
+  only after Cynthia explicitly agrees.
+- Never put the Supabase service-role key, Resend API key or any secret in mobile code,
+  in `EXPO_PUBLIC_*` variables, or in chat. Server secrets live in Supabase Edge Function secrets.
+- Never read or print `.env` files.
+- Ask before deleting code, files or data, or before any irreversible change.
+
+## How to work
+- Inspect the actual files before proposing changes; never assume state from docs.
+- One logical task at a time. State the directory, give exact commands, give the test
+  command after each change, and wait for output when it affects the next step.
+- Prefer editing existing working code over rewriting it.
+- Never claim something works without a test. Never invent test results.
+- Flag scope creep and timeline risk honestly. Do not silently expand scope.
+
+## Product rules the database must enforce (not just the UI)
+- Roles: collector, site_manager, recycler, admin. RLS on every table; explicit GRANTs
+  are needed because automatic table exposure is disabled on the project.
+- Users can be assigned to multiple sites via `user_sites` (admin-managed). 9 sites at launch, more later.
+- Materials PET, HDPE, LDPE, MIXED — avoid hardcoding so more can be added.
+- Collector-reported weight and site-manager-verified weight are separate fields.
+  Collector weight must never determine payout. Only approved + verified collections
+  are payment-eligible. Status changes and verified weight go through a server-side
+  RPC only; clients get no direct UPDATE on collections.
+- Rejection requires a reason. Keep an audit trail (who, when).
+- Offline: client-generated UUID per collection as idempotency key (unique constraint),
+  photos stored locally until sync, retry-safe uploads. No advanced conflict resolution.
+- Payment gateway / M-Pesa is out of scope; only record eligibility/status.
+
+## Invitations
+- Admin-only, via Edge Function. 7-day expiry. Reissue for expired invitations of
+  unconfirmed, inactive users only; atomic DB changes; old invitation can never be accepted.
+- Do NOT assume `auth.admin.generateLink({ type: "invite" })` or `inviteUserByEmail`
+  works for an existing Auth user — verify empirically on the local stack first.
+- Supabase's built-in email only reaches project team members. Real invites need
+  custom SMTP (planned: Resend, once a domain is verified).
+
+## Known issues found in review (pushed commit ac7c20e)
+- CI runs `npm test` but no test script exists; typecheck not in CI; EAS job lacks eas.json.
+- `access_requests` public INSERT policy is `WITH CHECK (true)` (anon can set status/role).
+- `sites` has RLS enabled but no read policy.
+- `collection_logs.total_payout` is generated from collector weight — must change.
+- `.env.example` references a different project ref than takalex-development.
+- README mentions Chemolex, 6 sites, SME groups and Mapbox — not in the current brief; defer.
+
+## Layout
+- apps/mobile/src/app — Expo Router routes: public pages, (auth), (collector), (admin), auth/callback
+- apps/mobile/src/stores/authStore.ts — Zustand auth state
+- apps/mobile/src/lib — supabase client, secure storage, access/sites helpers
+- supabase/migrations — 001..003 (not yet deployed; editable until first deploy, then frozen)
+- supabase/functions/invite-collector — admin invite Edge Function

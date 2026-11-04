@@ -5,13 +5,19 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, phone, role, is_active)
+  INSERT INTO public.profiles (
+    id,
+    full_name,
+    phone,
+    role,
+    is_active
+  )
   VALUES (
     NEW.id,
     NULLIF(NEW.raw_user_meta_data ->> 'full_name', ''),
     NEW.phone,
     'collector'::public.user_role,
-    true
+    false
   );
 
   RETURN NEW;
@@ -51,7 +57,3 @@ CREATE TRIGGER on_auth_user_profile_updated
   AFTER UPDATE OF phone, raw_user_meta_data ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION public.sync_auth_user_profile();
-
-CREATE POLICY "users_read_own_profile" ON public.profiles
-  FOR SELECT TO authenticated
-  USING (id = (SELECT auth.uid()));
