@@ -1,3 +1,8 @@
+> **Note (Nov 2026):** The current scope and confirmed operating model are in
+> [`docs/demo-plan.md`](docs/demo-plan.md). The playbook below is the original plan and
+> is partly outdated, including its six-site scope, SME groups, Mapbox and payout fields.
+> Setup instructions will be rewritten during handover.
+
 # TAKALEX APP MVP TECHNICAL PLAYBOOK
 
 This guide is divided into 4 one-week phases (sprints), each with clear goals, deliverables, and daily priorities.

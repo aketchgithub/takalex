@@ -53,7 +53,6 @@ The demo brief and confirmed operating model are in docs/demo-plan.md; read it b
   custom SMTP (planned: Resend, once a domain is verified).
 
 ## Known issues found in review (pushed commit ac7c20e)
-- `.env.example` references a different project ref than takalex-development.
 - README mentions 6 sites, SME groups and Mapbox; the agreed brief has 9 sites and no SME groups or maps. Confirm with Chemolex before building them.
 
 ## Migration policy
