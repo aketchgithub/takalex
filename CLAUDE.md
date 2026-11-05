@@ -5,6 +5,7 @@ Developer: Cynthia Chepkemoi Langat. Four-week, fixed-scope engagement.
 Android-first. Stack: Expo + React Native + TypeScript (apps/mobile), Supabase
 (Postgres, Auth, Edge Functions, Storage), Expo SQLite for offline, Sentry, GitHub Actions.
 Do not introduce another backend or replace the stack without explicit discussion.
+The demo brief and confirmed operating model are in docs/demo-plan.md; read it before demo work.
 
 ## Hard rules — never break these
 - Never run `git push`, `git reset --hard`, `git clean`, `git checkout -- <file>`,
@@ -52,7 +53,6 @@ Do not introduce another backend or replace the stack without explicit discussio
   custom SMTP (planned: Resend, once a domain is verified).
 
 ## Known issues found in review (pushed commit ac7c20e)
-- CI runs `npm test` but no test script exists; typecheck not in CI; EAS job lacks eas.json.
 - `.env.example` references a different project ref than takalex-development.
 - README mentions 6 sites, SME groups and Mapbox; the agreed brief has 9 sites and no SME groups or maps. Confirm with Chemolex before building them.
 

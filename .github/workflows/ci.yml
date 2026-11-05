@@ -1,7 +1,17 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+  # Manual runs only for the EAS build (it spends build quota).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  lint-test:
+  mobile:
+    name: Mobile typecheck and lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -9,19 +19,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with:
+          # Expo SDK 58 / React Native 0.88 require Node ^22.13.0 (matches local Node 22).
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
       - run: npm ci
+      - run: npm run typecheck
       - run: npm run lint
-      - run: npm test -- --passWithNoTests
+
+  sql-tests:
+    name: SQL tests (throwaway PostgreSQL)
+    runs-on: ubuntu-latest
+    env:
+      # Dedicated port for the throwaway cluster; run.sh refuses 5432,
+      # 54320-54329, ports in supabase/config.toml and ports already in use.
+      SQLTEST_PORT: '55439'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL server binaries and contrib (dblink)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql postgresql-contrib
+      - name: Run SQL suites
+        run: supabase/tests/sql/run.sh "$SQLTEST_PORT"
 
   eas-preview:
-    if: github.ref == 'refs/heads/main'
+    name: EAS preview build (manual)
+    if: github.event_name == 'workflow_dispatch'
+    needs: mobile
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/mobile
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
       - uses: expo/expo-github-action@v8
         with:
           eas-version: latest

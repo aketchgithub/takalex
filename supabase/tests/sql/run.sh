@@ -55,17 +55,29 @@ unset PGHOST PGHOSTADDR PGPORT PGUSER PGDATABASE PGPASSWORD PGPASSFILE \
 export PGCONNECT_TIMEOUT=10
 
 # --- PostgreSQL binaries ----------------------------------------------------
+# Detect a directory that has the server binaries (initdb, pg_ctl), not just
+# client tools: on Debian/Ubuntu `pg_config --bindir` can report /usr/bin,
+# which has psql but no initdb. Order: PG_BIN, pg_config --bindir, then the
+# newest /usr/lib/postgresql/<version>/bin.
+has_server_bins() { [[ -n "$1" && -x "$1/initdb" && -x "$1/pg_ctl" && -x "$1/psql" ]]; }
 if [[ -z "${PG_BIN:-}" ]]; then
-  if command -v pg_config >/dev/null; then
+  if command -v pg_config >/dev/null && has_server_bins "$(pg_config --bindir)"; then
     PG_BIN="$(pg_config --bindir)"
   else
-    PG_BIN="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)"
+    for candidate in $(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V -r); do
+      if has_server_bins "$candidate"; then PG_BIN="$candidate"; break; fi
+    done
   fi
 fi
-for b in initdb pg_ctl psql; do
-  [[ -x "$PG_BIN/$b" ]] || { echo "missing $PG_BIN/$b (set PG_BIN)" >&2; exit 2; }
-done
+has_server_bins "${PG_BIN:-}" ||
+  { echo "no PostgreSQL server binaries (initdb, pg_ctl, psql) found (set PG_BIN)" >&2; exit 2; }
+echo "using PostgreSQL: $("$PG_BIN/postgres" --version 2>/dev/null || echo "$PG_BIN")"
 SHAREDIR="$("$PG_BIN/pg_config" --sharedir 2>/dev/null || true)"
+# Debian layout without a per-version pg_config: /usr/lib/postgresql/N/bin
+# -> /usr/share/postgresql/N.
+if [[ -z "$SHAREDIR" && "$PG_BIN" =~ ^/usr/lib/postgresql/([0-9]+)/bin$ ]]; then
+  SHAREDIR="/usr/share/postgresql/${BASH_REMATCH[1]}"
+fi
 if [[ -n "$SHAREDIR" && ! -f "$SHAREDIR/extension/dblink.control" ]]; then
   echo "the dblink extension (postgresql-contrib) is required" >&2; exit 2
 fi
