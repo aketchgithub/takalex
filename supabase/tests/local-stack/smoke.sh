@@ -4,15 +4,21 @@
 #   supabase/tests/local-stack/smoke.sh
 #
 # Reads the API URL, DB URL, publishable and secret keys at runtime from
-# `supabase status -o env`. Keys are never printed and never appear on a
-# command line (they reach curl through a config on stdin). Refuses to run
-# unless both URLs point at 127.0.0.1. Deletes every row it inserted on exit,
-# including on failure or Ctrl-C. Exits non-zero if any check fails.
+# `supabase status -o env`. Keys and the DB password are never printed and
+# never appear on a command line (keys reach curl through a config on stdin;
+# the DB password reaches psql through its environment). curl ignores
+# ~/.curlrc and every proxy setting. Refuses to run unless both URLs point at
+# 127.0.0.1. Deletes every row it inserted on exit, including on failure or
+# Ctrl-C. Exits non-zero if any check fails.
 set -euo pipefail
 
 command -v supabase >/dev/null || { echo "supabase CLI not found" >&2; exit 2; }
 command -v curl >/dev/null || { echo "curl not found" >&2; exit 2; }
 command -v psql >/dev/null || { echo "psql not found" >&2; exit 2; }
+
+# Never let libpq pick up a host, port, service or options from the environment.
+unset PGHOST PGHOSTADDR PGPORT PGUSER PGDATABASE PGPASSWORD PGPASSFILE \
+      PGSERVICE PGSERVICEFILE PGOPTIONS PGSSLMODE PGAPPNAME || true
 
 ENV_OUT="$(supabase status -o env 2>/dev/null)" ||
   { echo "supabase status failed (is the local stack running?)" >&2; exit 2; }
@@ -26,10 +32,22 @@ unset ENV_OUT
 # Local only: the host must be exactly 127.0.0.1.
 [[ "$API_URL" =~ ^http://127\.0\.0\.1:[0-9]+$ ]] ||
   { echo "refusing: API_URL is not http://127.0.0.1:<port>" >&2; exit 2; }
-[[ "$DB_URL" =~ ^postgres(ql)?://[^@]+@127\.0\.0\.1:[0-9]+/ ]] ||
-  { echo "refusing: DB_URL is not on 127.0.0.1" >&2; exit 2; }
+# Anchored at both ends: no query string (e.g. ?host=) can redirect psql.
+DB_RE='^postgres(ql)?://([^:@/?#]+):([^@/?#]+)@127\.0\.0\.1:([0-9]+)/([A-Za-z0-9_]+)$'
+[[ "$DB_URL" =~ $DB_RE ]] ||
+  { echo "refusing: DB_URL is not postgresql://user:pass@127.0.0.1:<port>/<db>" >&2; exit 2; }
+DB_USER="${BASH_REMATCH[2]}" DB_PASS="${BASH_REMATCH[3]}"
+DB_PORT="${BASH_REMATCH[4]}" DB_NAME="${BASH_REMATCH[5]}"
+unset DB_URL
 [[ -n "$PUB_KEY" && -n "$SEC_KEY" ]] ||
   { echo "publishable or secret key missing from supabase status" >&2; exit 2; }
+
+# psql against the local DB. Connection details go through the child's
+# environment only, never its argument list.
+pg() {
+  PGHOST=127.0.0.1 PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PASS" \
+  PGDATABASE="$DB_NAME" psql -X -q -At -v ON_ERROR_STOP=1 "$@"
+}
 
 REST="$API_URL/rest/v1"
 RUN_ID="$(date +%s)-$$-$RANDOM"
@@ -42,8 +60,7 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM HUP
   local n
-  n="$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 \
-        -v e1="$EMAIL" -v e2="$EMAIL_STATUS" 2>&1 <<'SQL'
+  n="$(pg -v e1="$EMAIL" -v e2="$EMAIL_STATUS" 2>&1 <<'SQL'
 WITH d AS (DELETE FROM public.access_requests WHERE email IN (:'e1', :'e2') RETURNING 1)
 SELECT count(*) FROM d;
 SQL
@@ -64,9 +81,11 @@ check() {
   local args=(-s -o "$BODY" -w '%{http_code}' -X "$method" "$REST/$path"
               -H "Content-Type: application/json")
   [[ -n "$prefer" ]] && args+=(-H "Prefer: $prefer")
-  [[ -n "$data" ]] && args+=(--data "$data")
+  [[ -n "$data" ]] && args+=(--data-raw "$data")
   local code
-  code="$(printf 'header = "apikey: %s"\n' "$key" | curl -K - "${args[@]}")" || code="curl-error"
+  # -q (must be first): ignore ~/.curlrc. --noproxy '*': never send the key to a proxy.
+  code="$(printf 'header = "apikey: %s"\n' "$key" |
+          curl -q --noproxy '*' -K - "${args[@]}")" || code="curl-error"
   local body; body="$(cat "$BODY")"
   local ok=1
   [[ "$code" == "$want" ]] || ok=0
@@ -93,14 +112,15 @@ check "anon: rpc/review_collection denied" "$PUB_KEY" POST rpc/review_collection
   '{"p_collection_id":"00000000-0000-0000-0000-000000000000","p_approved":true,"p_verified_weight_kg":1,"p_rejection_reason":null}'
 check "anon: rpc/bootstrap_first_admin denied" "$PUB_KEY" POST rpc/bootstrap_first_admin 401 "$DENIED" \
   "{\"p_email\":\"$EMAIL\"}"
-check "service_role: invitations?select=code_hash denied" "$SEC_KEY" GET "invitations?select=code_hash" 403 "$DENIED"
+# limit=0: if this denial ever regresses, the failure output contains no hashes.
+check "service_role: invitations?select=code_hash denied" "$SEC_KEY" GET "invitations?select=code_hash&limit=0" 403 "$DENIED"
 check "service_role: invitations?select=id,status allowed" "$SEC_KEY" GET "invitations?select=id,status" 200 '^\['
 check "service_role: rpc/verify_invitation_code junk -> generic failure" "$SEC_KEY" POST rpc/verify_invitation_code 200 \
   '^\[\{"is_valid":false,"invitation_id":null,"auth_user_id":null\}\]$' \
-  '{"p_email":"nobody@example.test","p_code_hash":"junk"}'
+  "{\"p_email\":\"nobody-$RUN_ID@example.test\",\"p_code_hash\":\"junk\"}"
 
 # The insert must have landed exactly once, with server defaults.
-ROW="$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -v e1="$EMAIL" -v e2="$EMAIL_STATUS" <<'SQL'
+ROW="$(pg -v e1="$EMAIL" -v e2="$EMAIL_STATUS" <<'SQL'
 SELECT (SELECT count(*) FROM public.access_requests WHERE email = :'e1') || ' ' ||
        COALESCE((SELECT status::text || '/' || (reviewed_by IS NULL)::text
                  FROM public.access_requests WHERE email = :'e1'), '-') || ' ' ||
