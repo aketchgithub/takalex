@@ -480,13 +480,14 @@ BEGIN
   PERFORM t.as_user(t.id('m2'));
   ASSERT NOT EXISTS (SELECT 1 FROM public.collection_logs WHERE site_id = t.site(1)), 'm2 sees site 1';
 
+  -- recyclers read no individual collection, even an approved one at their site
   PERFORM t.as_user(t.id('r1'));
-  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_logs
-                     WHERE status <> 'approved' OR site_id <> t.site(1)), 'r1 sees too much';
-  ASSERT EXISTS (SELECT 1 FROM public.collection_logs WHERE id = t.id('col_a'));
+  SELECT count(*) INTO n FROM public.collection_logs;
+  ASSERT n = 0, 'recycler r1 sees ' || n || ' collections';
 
   PERFORM t.as_user(t.id('r2'));
-  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_logs WHERE site_id = t.site(1)), 'r2 sees site 1';
+  SELECT count(*) INTO n FROM public.collection_logs;
+  ASSERT n = 0, 'recycler r2 sees ' || n || ' collections';
 
   PERFORM t.as_user(t.id('m_off'));
   SELECT count(*) INTO n FROM public.collection_logs;
@@ -495,31 +496,34 @@ BEGIN
   PERFORM t.as_user(t.id('admin'));
   SELECT count(*) INTO n FROM public.collection_logs;
   ASSERT n = v_total, 'admin sees ' || n || ' of ' || v_total;
-  PERFORM t.pass('RLS reads: own rows; managers by site; recyclers approved at their site only; admin all');
+  PERFORM t.pass('RLS reads: own rows; managers by site; recyclers none; admin all');
 END $$;
 
 -- 17
 DO $$
-DECLARE v_c2 UUID; n BIGINT;
+DECLARE v_c2 UUID; v_c2_rec UUID; v_a_rec UUID; v_dir TEXT; n BIGINT;
 BEGIN
-  SELECT id INTO STRICT v_c2 FROM public.collection_logs
+  SELECT id, client_record_id INTO STRICT v_c2, v_c2_rec FROM public.collection_logs
   WHERE collector_id = t.id('c2') LIMIT 1;
+  SELECT client_record_id INTO STRICT v_a_rec FROM public.collection_logs WHERE id = t.id('col_a');
+  SELECT t.id('c1') || '/' || client_record_id || '/' INTO STRICT v_dir
+  FROM public.collection_logs WHERE id = t.id('col_forged');
   PERFORM t.as_user(t.id('c1'));
   INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-  VALUES (t.id('col_forged'), 'c1/forged/1.jpg', 'image/jpeg');
+  VALUES (t.id('col_forged'), v_dir || '1.jpg', 'image/jpeg');
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (v_c2, 'c1/other/1.jpg', 'image/jpeg');
+    VALUES (v_c2, t.id('c1') || '/' || v_c2_rec || '/1.jpg', 'image/jpeg');
     RAISE EXCEPTION 'evidence on another collector''s row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (t.id('col_a'), 'c1/approved/1.jpg', 'image/jpeg');
+    VALUES (t.id('col_a'), t.id('c1') || '/' || v_a_rec || '/1.jpg', 'image/jpeg');
     RAISE EXCEPTION 'evidence on a reviewed row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (t.id('col_forged'), 'c1/forged/1.jpg', 'image/jpeg');
+    VALUES (t.id('col_forged'), v_dir || '1.jpg', 'image/jpeg');
     RAISE EXCEPTION 'duplicate storage path accepted';
   EXCEPTION WHEN unique_violation THEN NULL; END;
   -- UPDATE/DELETE: either no privilege or no policy (0 rows).
@@ -536,7 +540,7 @@ BEGIN
   PERFORM t.become('postgres');
   -- (other collections carry owner-inserted evidence from t.add_evidence)
   ASSERT (SELECT count(*) FROM public.collection_evidence WHERE collection_id = t.id('col_forged')) = 1;
-  ASSERT (SELECT count(*) FROM public.collection_evidence WHERE storage_path LIKE 'c1/%') = 1;
+  ASSERT (SELECT count(*) FROM public.collection_evidence WHERE starts_with(storage_path, t.id('c1')::text)) = 1;
   ASSERT NOT EXISTS (SELECT 1 FROM information_schema.columns
                      WHERE table_schema = 'public' AND table_name = 'collection_evidence'
                        AND column_name IN ('latitude', 'longitude')),
@@ -1052,10 +1056,10 @@ BEGIN
     SELECT count(*) INTO n FROM public.collection_verified_items WHERE collection_id = t.id('col_a');
     ASSERT n = 2, u || ' sees ' || n || ' lines of col_a';
   END LOOP;
-  -- r1 can still read the approved collection row itself (S1b removes that),
-  -- but never its breakdown lines
+  -- r1 (recycler at col_a's site) reads neither the collection nor its lines
   PERFORM t.as_user(t.id('r1'));
-  ASSERT EXISTS (SELECT 1 FROM public.collection_logs WHERE id = t.id('col_a'));
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_logs WHERE id = t.id('col_a')),
+    'recycler r1 reads col_a';
   SELECT count(*) INTO n FROM public.collection_verified_items;
   ASSERT n = 0, 'recycler r1 sees ' || n || ' lines';
   FOREACH u IN ARRAY ARRAY['c2', 'm2', 'r2', 'm_off'] LOOP
@@ -1078,4 +1082,179 @@ BEGIN
     RAISE EXCEPTION 'anon read verified lines';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM t.pass('verified lines visible to the owning collector, site managers and admins only; recyclers, other sites, inactive users and anon see none');
+END $$;
+
+-- ============================================================ S1b: recycler denial, evidence insert
+-- 36: recyclers read 0 rows from collection_logs, collection_evidence,
+-- collection_events and collection_verified_items, including at their own
+-- site and for approved collections. Ground truth is checked first so the
+-- test cannot pass vacuously.
+DO $$
+DECLARE n BIGINT; u TEXT; tbl TEXT;
+BEGIN
+  -- site 1 has approved and pending collections with evidence, events and lines
+  ASSERT EXISTS (SELECT 1 FROM public.collection_logs WHERE site_id = t.site(1) AND status = 'approved');
+  ASSERT EXISTS (SELECT 1 FROM public.collection_logs WHERE site_id = t.site(1) AND status = 'pending');
+  ASSERT (SELECT count(*) FROM public.collection_evidence) > 0;
+  ASSERT (SELECT count(*) FROM public.collection_events) > 0;
+  ASSERT (SELECT count(*) FROM public.collection_verified_items WHERE collection_id = t.id('col_a')) > 0;
+  -- r_multi: active recycler assigned to every site that has collections
+  PERFORM t.mkuser('r_multi', 'rmulti@example.test', true);
+  PERFORM t.set_profile(t.id('r_multi'), 'recycler', true);
+  PERFORM t.assign(t.id('r_multi'), t.site(1));
+  PERFORM t.assign(t.id('r_multi'), t.site(2));
+
+  FOREACH u IN ARRAY ARRAY['r1', 'r2', 'r_multi'] LOOP
+    FOREACH tbl IN ARRAY ARRAY['collection_logs', 'collection_evidence',
+                               'collection_events', 'collection_verified_items'] LOOP
+      PERFORM t.as_user(t.id(u));
+      EXECUTE format('SELECT count(*) FROM public.%I', tbl) INTO n;
+      PERFORM t.become('postgres');
+      ASSERT n = 0, format('recycler %s reads %s rows from %s', u, n, tbl);
+    END LOOP;
+  END LOOP;
+
+  -- direct lookups by id are denied too
+  PERFORM t.as_user(t.id('r1'));
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_events WHERE collection_id = t.id('col_a'));
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_evidence WHERE collection_id = t.id('col_a'));
+  PERFORM t.become('postgres');
+
+  -- the same rows are still visible to the owner, the site manager and admin
+  FOREACH u IN ARRAY ARRAY['c1', 'm1', 'admin'] LOOP
+    PERFORM t.as_user(t.id(u));
+    ASSERT EXISTS (SELECT 1 FROM public.collection_events WHERE collection_id = t.id('col_a')),
+      u || ' cannot read col_a events';
+    ASSERT EXISTS (SELECT 1 FROM public.collection_evidence WHERE collection_id = t.id('col_a')),
+      u || ' cannot read col_a evidence';
+    PERFORM t.become('postgres');
+  END LOOP;
+  -- and not to another site's manager or collector
+  FOREACH u IN ARRAY ARRAY['m2', 'c2', 'm_off'] LOOP
+    PERFORM t.as_user(t.id(u));
+    ASSERT NOT EXISTS (SELECT 1 FROM public.collection_events WHERE collection_id = t.id('col_a')),
+      u || ' reads col_a events';
+    ASSERT NOT EXISTS (SELECT 1 FROM public.collection_evidence WHERE collection_id = t.id('col_a')),
+      u || ' reads col_a evidence';
+    PERFORM t.become('postgres');
+  END LOOP;
+  PERFORM t.pass('recyclers (single- and multi-site) read 0 rows from collections, evidence, events and verified lines; owner, site manager and admin still read them');
+END $$;
+
+-- 37: evidence INSERT: column grants, server-set uploaded_at, storage path
+-- prefix {auth.uid()}/{client_record_id}/, own pending collection only
+DO $$
+DECLARE
+  v_id UUID; v_rec UUID; v_other UUID; v_other_rec UUID; v_dir TEXT;
+  r public.collection_evidence; col TEXT; n BIGINT;
+  v_bad TEXT;
+BEGIN
+  v_id := t.submit(t.id('c1'), 'col_ev', t.site(1), 'PET', 3);
+  v_rec := t.id('col_ev_rec');
+  v_other := t.submit(t.id('c1'), 'col_ev2', t.site(1), 'PP', 4);
+  v_other_rec := t.id('col_ev2_rec');
+  v_dir := t.id('c1') || '/' || v_rec || '/';
+
+  -- column grants: exactly these four, nothing else; no UPDATE
+  FOR col IN SELECT attname FROM pg_attribute
+             WHERE attrelid = 'public.collection_evidence'::regclass AND attnum > 0 AND NOT attisdropped LOOP
+    ASSERT has_column_privilege('authenticated', 'public.collection_evidence', col, 'INSERT')
+           = (col = ANY (ARRAY['collection_id', 'storage_path', 'content_type', 'captured_at'])),
+      'authenticated INSERT on evidence.' || col;
+    ASSERT NOT has_column_privilege('authenticated', 'public.collection_evidence', col, 'UPDATE'),
+      'authenticated UPDATE on evidence.' || col;
+  END LOOP;
+  ASSERT NOT has_table_privilege('authenticated', 'public.collection_evidence', 'INSERT');
+
+  PERFORM t.as_user(t.id('c1'));
+  -- uploaded_at and id cannot be supplied by the client
+  BEGIN
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, uploaded_at)
+    VALUES (v_id, v_dir || 'ts.jpg', 'image/jpeg', '2000-01-01');
+    RAISE EXCEPTION 'client supplied uploaded_at';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    INSERT INTO public.collection_evidence (id, collection_id, storage_path, content_type)
+    VALUES (gen_random_uuid(), v_id, v_dir || 'id.jpg', 'image/jpeg');
+    RAISE EXCEPTION 'client supplied id';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+
+  -- paths outside {c1}/{v_rec}/ are refused
+  FOREACH v_bad IN ARRAY ARRAY[
+    'photo.jpg',                                          -- no folder
+    v_rec || '/photo.jpg',                                -- missing uid
+    t.id('c1') || '/photo.jpg',                           -- missing record id
+    t.id('c1') || '/' || v_rec,                           -- no trailing slash, no file
+    v_dir,                                                -- folder only, no file name
+    t.id('c1') || '/' || v_rec || 'x/photo.jpg',          -- record id is only a prefix
+    t.id('c2') || '/' || v_rec || '/photo.jpg',           -- another user's folder
+    t.id('c1') || '/' || v_other_rec || '/photo.jpg',     -- own, but another collection
+    upper(v_dir) || 'photo.jpg',                          -- case differs
+    '/' || v_dir || 'photo.jpg',                          -- leading slash
+    t.id('c1') || '/' || v_id || '/photo.jpg'             -- server id, not client_record_id
+  ] LOOP
+    BEGIN
+      INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+      VALUES (v_id, v_bad, 'image/jpeg');
+      RAISE EXCEPTION 'evidence path accepted: %', v_bad;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+
+  -- a valid path is accepted; uploaded_at is the server's time
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, captured_at)
+  VALUES (v_id, v_dir || 'photo-1.jpg', 'image/jpeg', '2000-01-01');
+  -- a nested name under the folder is also fine
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+  VALUES (v_id, v_dir || 'thumbs/photo-1.jpg', 'image/jpeg');
+  PERFORM t.become('postgres');
+  SELECT * INTO STRICT r FROM public.collection_evidence WHERE storage_path = v_dir || 'photo-1.jpg';
+  ASSERT r.uploaded_at = now(), 'uploaded_at is server-set';
+  ASSERT r.captured_at = '2000-01-01', 'captured_at kept as device-reported';
+  ASSERT (SELECT count(*) FROM public.collection_evidence WHERE collection_id = v_id) = 2;
+
+  -- the trigger forces uploaded_at even for an owner insert
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, uploaded_at)
+  VALUES (v_id, 'owner/' || gen_random_uuid() || '.jpg', 'image/jpeg', '2000-01-01')
+  RETURNING * INTO r;
+  ASSERT r.uploaded_at = now(), 'owner-supplied uploaded_at kept';
+
+  -- a manager, recycler, admin or inactive collector cannot add evidence to
+  -- c1's collection, even with c1's path
+  FOREACH col IN ARRAY ARRAY['m1', 'r1', 'admin', 'c_off', 'c2'] LOOP
+    BEGIN
+      PERFORM t.as_user(t.id(col));
+      INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+      VALUES (v_id, v_dir || col || '.jpg', 'image/jpeg');
+      RAISE EXCEPTION '% added evidence to c1''s collection', col;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+  PERFORM t.become('postgres');
+
+  -- service_role and anon have no INSERT at all
+  BEGIN
+    PERFORM t.become('service_role');
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_id, v_dir || 'svc.jpg', 'image/jpeg');
+    RAISE EXCEPTION 'service_role inserted evidence';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.become('anon');
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_id, v_dir || 'anon.jpg', 'image/jpeg');
+    RAISE EXCEPTION 'anon inserted evidence';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  PERFORM t.become('postgres');
+
+  -- once reviewed, even a correct path is refused
+  PERFORM t.review_as(t.id('m1'), v_id, false, NULL, 'blurry photos');
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_id, v_dir || 'late.jpg', 'image/jpeg');
+    RAISE EXCEPTION 'evidence added after review';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  PERFORM t.become('postgres');
+  SELECT count(*) INTO n FROM public.collection_evidence WHERE collection_id = v_id;
+  ASSERT n = 3, 'evidence rows for col_ev: ' || n;
+  PERFORM t.pass('evidence insert: 4 client columns, server-set uploaded_at (even for owner), path must be {uid}/{client_record_id}/<name> on own pending collection');
 END $$;

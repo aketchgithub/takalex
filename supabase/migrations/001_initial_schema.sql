@@ -201,6 +201,11 @@ CREATE INDEX collection_logs_submitted_at_idx
 
 -- PHOTO EVIDENCE
 -- Device location lives on collection_logs (one per delivery), not here.
+-- Collectors may only supply collection_id, storage_path, content_type and
+-- captured_at (see column grants below); uploaded_at is always server-set
+-- (enforce_collection_evidence_insert). storage_path must start with
+-- {auth.uid()}/{the collection's client_record_id}/ (collectors_add_evidence).
+-- The storage bucket and object-exists check come later (S2).
 CREATE TABLE public.collection_evidence (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   collection_id UUID NOT NULL
@@ -427,6 +432,28 @@ CREATE TRIGGER collection_verified_items_protect
   BEFORE INSERT OR UPDATE ON public.collection_verified_items
   FOR EACH ROW
   EXECUTE FUNCTION public.protect_collection_verified_item();
+
+-- Evidence upload time is always the server's, whatever the caller (even the
+-- owner) supplied. Clients cannot supply it anyway (no column grant).
+CREATE OR REPLACE FUNCTION public.enforce_collection_evidence_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  NEW.uploaded_at := NOW();
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.enforce_collection_evidence_insert()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER collection_evidence_enforce_insert
+  BEFORE INSERT ON public.collection_evidence
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_collection_evidence_insert();
 
 -- SECURITY HELPERS
 CREATE OR REPLACE FUNCTION public.is_active_admin()
@@ -776,23 +803,14 @@ CREATE POLICY groups_admin_manage
   WITH CHECK (public.is_active_admin());
 
 -- COLLECTIONS
+-- Readable by the owning collector, managers who can review the site and
+-- active admins. Recyclers read no individual collection, evidence, event
+-- or verified line; they will only see aggregate totals (later migration).
 CREATE POLICY collections_read_permitted
   ON public.collection_logs FOR SELECT TO authenticated
   USING (
     collector_id = (SELECT auth.uid())
-    OR public.is_active_admin()
     OR public.can_review_site(site_id)
-    OR (
-      status = 'approved'
-      AND EXISTS (
-        SELECT 1
-        FROM public.profiles p
-        WHERE p.id = (SELECT auth.uid())
-          AND p.role = 'recycler'::public.user_role
-          AND p.is_active = true
-          AND public.is_active_site_member(site_id)
-      )
-    )
   );
 
 CREATE POLICY collectors_submit_collections
@@ -819,6 +837,8 @@ CREATE POLICY collectors_submit_collections
 -- Reviews must go through review_collection().
 
 -- EVIDENCE
+-- Same audience as the parent collection, stated explicitly rather than
+-- inherited from collection_logs RLS. Recyclers have no access.
 CREATE POLICY evidence_read_permitted
   ON public.collection_evidence FOR SELECT TO authenticated
   USING (
@@ -826,9 +846,15 @@ CREATE POLICY evidence_read_permitted
       SELECT 1
       FROM public.collection_logs c
       WHERE c.id = collection_id
+        AND (
+          c.collector_id = (SELECT auth.uid())
+          OR public.can_review_site(c.site_id)
+        )
     )
   );
 
+-- Only on the caller's own pending collection, and only under that
+-- collection's folder: {auth.uid()}/{client_record_id}/<something>.
 CREATE POLICY collectors_add_evidence
   ON public.collection_evidence FOR INSERT TO authenticated
   WITH CHECK (
@@ -838,6 +864,12 @@ CREATE POLICY collectors_add_evidence
       WHERE c.id = collection_id
         AND c.collector_id = (SELECT auth.uid())
         AND c.status = 'pending'
+        AND starts_with(
+          storage_path,
+          (SELECT auth.uid())::text || '/' || c.client_record_id::text || '/'
+        )
+        AND length(storage_path) >
+          length((SELECT auth.uid())::text || '/' || c.client_record_id::text || '/')
     )
   );
 
@@ -860,6 +892,7 @@ CREATE POLICY verified_items_read_permitted
   );
 
 -- EVENTS
+-- Same audience as the parent collection, stated explicitly. No recyclers.
 CREATE POLICY events_read_permitted
   ON public.collection_events FOR SELECT TO authenticated
   USING (
@@ -867,6 +900,10 @@ CREATE POLICY events_read_permitted
       SELECT 1
       FROM public.collection_logs c
       WHERE c.id = collection_id
+        AND (
+          c.collector_id = (SELECT auth.uid())
+          OR public.can_review_site(c.site_id)
+        )
     )
   );
 
@@ -900,7 +937,13 @@ GRANT INSERT (
   device_longitude,
   device_accuracy_m
 ) ON public.collection_logs TO authenticated;
-GRANT INSERT ON public.collection_evidence TO authenticated;
+-- Evidence: id and uploaded_at are server-set.
+GRANT INSERT (
+  collection_id,
+  storage_path,
+  content_type,
+  captured_at
+) ON public.collection_evidence TO authenticated;
 
 -- service_role (Edge Functions). It bypasses RLS, so these grants are its
 -- only limit. Read-only: every write goes through a SECURITY DEFINER RPC.

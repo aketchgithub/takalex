@@ -302,7 +302,11 @@ BEGIN
     RAISE EXCEPTION 'A full name is required';
   END IF;
 
-  IF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
+  -- Collectors and site managers need at least one site; recyclers may have
+  -- none (NULL is treated as none for them).
+  IF p_role = 'recycler'::public.user_role THEN
+    p_site_ids := COALESCE(p_site_ids, '{}'::UUID[]);
+  ELSIF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
     RAISE EXCEPTION 'At least one site assignment is required';
   END IF;
 
@@ -501,10 +505,14 @@ BEGIN
     RAISE EXCEPTION 'Auth account email does not match invitation email';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM public.user_sites AS us
-    WHERE us.user_id = v_auth_user_id
-  ) THEN
+  -- Collectors and site managers need at least one site; recyclers may have
+  -- none.
+  IF v_role IN ('collector'::public.user_role, 'site_manager'::public.user_role)
+    AND NOT EXISTS (
+      SELECT 1 FROM public.user_sites AS us
+      WHERE us.user_id = v_auth_user_id
+    )
+  THEN
     RAISE EXCEPTION 'No site assignment exists for this invitation';
   END IF;
 
@@ -580,7 +588,11 @@ BEGIN
     RAISE EXCEPTION 'A full name is required';
   END IF;
 
-  IF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
+  -- Collectors and site managers need at least one site; recyclers may have
+  -- none (NULL is treated as none for them).
+  IF p_role = 'recycler'::public.user_role THEN
+    p_site_ids := COALESCE(p_site_ids, '{}'::UUID[]);
+  ELSIF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
     RAISE EXCEPTION 'At least one site assignment is required';
   END IF;
 

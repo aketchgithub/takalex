@@ -815,3 +815,166 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.invitations WHERE auth_user_id = v_e);
   PERFORM t.pass('deleting an Auth user cascades through a superseded chain');
 END $$;
+
+-- ============================================================ S1b: sites per role
+-- Collectors and site managers need at least one site in register, reissue
+-- and consume; recyclers may have none. All calls run as service_role.
+
+-- 32: register
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_role TEXT; v_sites UUID[]; k INTEGER := 0;
+BEGIN
+  PERFORM t.become('service_role');
+  -- collector / site_manager with '{}' or NULL: refused, nothing written
+  FOREACH v_role IN ARRAY ARRAY['collector', 'site_manager'] LOOP
+    FOR i IN 1..2 LOOP
+      k := k + 1;
+      v_sites := CASE i WHEN 1 THEN '{}'::uuid[] ELSE NULL END;
+      v_u := t.mkuser('s1b_reg_' || k, 's1b.reg' || k || '@example.test');
+      BEGIN
+        PERFORM public.register_invitation(v_u, 's1b.reg' || k || '@example.test', 'R',
+          v_role::public.user_role, v_sites, t.id('admin'), t.h('s1b' || k));
+        RAISE EXCEPTION '% registered with sites %', v_role, v_sites;
+      EXCEPTION WHEN raise_exception THEN
+        ASSERT SQLERRM = 'At least one site assignment is required', SQLERRM;
+      END;
+      ASSERT t.inv_count(v_u) = 0, v_role || ': invitation written';
+      ASSERT t.sites_of(v_u) = '{}', v_role || ': sites written';
+      ASSERT (SELECT p.role = 'collector' AND NOT p.is_active FROM t.profile(v_u) AS p),
+        v_role || ': profile changed';
+    END LOOP;
+  END LOOP;
+
+  -- recycler with '{}' and with NULL: accepted, zero sites
+  FOR i IN 1..2 LOOP
+    v_sites := CASE i WHEN 1 THEN '{}'::uuid[] ELSE NULL END;
+    v_u := t.mkuser('s1b_rec_' || i, 's1b.rec' || i || '@example.test');
+    v_inv := public.register_invitation(v_u, 's1b.rec' || i || '@example.test', 'Rec',
+      'recycler', v_sites, t.id('admin'), t.h('s1brec' || i));
+    PERFORM t.put('s1b_rec_inv_' || i, v_inv);
+    ASSERT t.status(v_inv) = 'pending';
+    ASSERT t.sites_of(v_u) = '{}', 'recycler got sites';
+    ASSERT (SELECT p.role = 'recycler' AND NOT p.is_active FROM t.profile(v_u) AS p);
+  END LOOP;
+
+  -- recycler with sites: still allowed; duplicates still refused
+  v_u := t.mkuser('s1b_rec_3', 's1b.rec3@example.test');
+  v_inv := public.register_invitation(v_u, 's1b.rec3@example.test', 'Rec', 'recycler',
+    ARRAY[t.site(4)], t.id('admin'), t.h('s1brec3'));
+  ASSERT t.sites_of(v_u) = ARRAY[t.site(4)];
+  v_u := t.mkuser('s1b_rec_4', 's1b.rec4@example.test');
+  BEGIN
+    PERFORM public.register_invitation(v_u, 's1b.rec4@example.test', 'Rec', 'recycler',
+      ARRAY[t.site(4), t.site(4)], t.id('admin'), t.h('s1brec4'));
+    RAISE EXCEPTION 'recycler duplicate sites accepted';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'Duplicate site assignments are not allowed', SQLERRM;
+  END;
+  BEGIN
+    PERFORM public.register_invitation(v_u, 's1b.rec4@example.test', 'Rec', 'recycler',
+      ARRAY[gen_random_uuid()], t.id('admin'), t.h('s1brec4'));
+    RAISE EXCEPTION 'recycler unknown site accepted';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM LIKE 'One or more selected sites%', SQLERRM;
+  END;
+  ASSERT t.inv_count(v_u) = 0;
+
+  -- site manager with one site: accepted (control)
+  v_u := t.mkuser('s1b_mgr', 's1b.mgr@example.test');
+  v_inv := public.register_invitation(v_u, 's1b.mgr@example.test', 'Mgr', 'site_manager',
+    ARRAY[t.site(6)], t.id('admin'), t.h('s1bmgr'));
+  PERFORM t.put('s1b_mgr_inv', v_inv);
+  ASSERT t.sites_of(v_u) = ARRAY[t.site(6)];
+  PERFORM t.pass('register: collector/site_manager need >= 1 site ({} and NULL refused, nothing written); recycler may have 0 (or some) sites');
+END $$;
+
+-- 33: consume
+DO $$
+DECLARE v_inv UUID; v_u UUID;
+BEGIN
+  PERFORM t.become('service_role');
+  -- recyclers with zero sites activate
+  FOR i IN 1..2 LOOP
+    v_inv := t.id('s1b_rec_inv_' || i);
+    v_u := t.id('s1b_rec_' || i);
+    PERFORM t.confirm(v_u);
+    ASSERT t.sites_of(v_u) = '{}';
+    ASSERT public.consume_invitation(v_inv) = v_inv;
+    ASSERT t.status(v_inv) = 'accepted';
+    ASSERT (SELECT p.is_active AND p.role = 'recycler' FROM t.profile(v_u) AS p);
+  END LOOP;
+
+  -- a site manager whose sites were removed cannot activate
+  v_inv := t.id('s1b_mgr_inv');
+  v_u := t.id('s1b_mgr');
+  PERFORM t.confirm(v_u);
+  PERFORM t.as_owner(format('DELETE FROM public.user_sites WHERE user_id = %L', v_u));
+  BEGIN
+    PERFORM public.consume_invitation(v_inv);
+    RAISE EXCEPTION 'site manager consumed without sites';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'No site assignment exists for this invitation', SQLERRM;
+  END;
+  ASSERT t.status(v_inv) = 'pending' AND NOT (t.profile(v_u)).is_active;
+  -- with a site again it activates
+  PERFORM t.assign(v_u, t.site(6));
+  ASSERT public.consume_invitation(v_inv) = v_inv;
+  ASSERT (SELECT p.is_active AND p.role = 'site_manager' FROM t.profile(v_u) AS p);
+  -- (collector without sites: test 14)
+  PERFORM t.pass('consume: recycler with 0 sites activates; site manager (and collector, test 14) with 0 sites refused, nothing changed');
+END $$;
+
+-- 34: reissue
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_new UUID; v_before JSONB; v_role TEXT;
+BEGIN
+  PERFORM t.become('service_role');
+  v_u := t.mkuser('s1b_re', 's1b.re@example.test');
+  v_inv := public.register_invitation(v_u, 's1b.re@example.test', 'Re', 'collector',
+    ARRAY[t.site(7)], t.id('admin'), t.h('s1bre1'));
+  PERFORM t.expire(v_inv);
+  v_before := to_jsonb(t.inv(v_inv));
+
+  -- collector / site_manager with '{}' or NULL: refused, nothing changed
+  FOREACH v_role IN ARRAY ARRAY['collector', 'site_manager'] LOOP
+    BEGIN
+      PERFORM public.reissue_invitation(v_inv, t.id('admin'), t.h('s1bre2'), 'Re',
+        v_role::public.user_role, '{}'::uuid[]);
+      RAISE EXCEPTION '% reissued with no sites', v_role;
+    EXCEPTION WHEN raise_exception THEN
+      ASSERT SQLERRM = 'At least one site assignment is required', SQLERRM;
+    END;
+    BEGIN
+      PERFORM public.reissue_invitation(v_inv, t.id('admin'), t.h('s1bre2'), 'Re',
+        v_role::public.user_role, NULL);
+      RAISE EXCEPTION '% reissued with NULL sites', v_role;
+    EXCEPTION WHEN raise_exception THEN
+      ASSERT SQLERRM = 'At least one site assignment is required', SQLERRM;
+    END;
+  END LOOP;
+  ASSERT to_jsonb(t.inv(v_inv)) = v_before, 'old invitation changed';
+  ASSERT t.inv_count(v_u) = 1;
+  ASSERT t.sites_of(v_u) = ARRAY[t.site(7)], 'sites changed';
+  ASSERT (t.profile(v_u)).role = 'collector';
+
+  -- reissue as a recycler with no sites: old sites cleared, then consumable
+  v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('s1bre3'), 'Re',
+    'recycler', '{}'::uuid[]);
+  ASSERT t.status(v_inv) = 'superseded' AND (t.inv(v_inv)).superseded_by = v_new;
+  ASSERT t.sites_of(v_u) = '{}', 'sites not cleared';
+  ASSERT (t.profile(v_u)).role = 'recycler';
+  PERFORM t.confirm(v_u);
+  ASSERT (t.v('s1b.re@example.test', 's1bre3')->>'is_valid')::bool;
+  ASSERT public.consume_invitation(v_new) = v_new;
+  ASSERT (SELECT p.is_active AND p.role = 'recycler' FROM t.profile(v_u) AS p);
+
+  -- recycler reissue with NULL sites is also accepted
+  v_u := t.mkuser('s1b_re2', 's1b.re2@example.test');
+  v_inv := public.register_invitation(v_u, 's1b.re2@example.test', 'Re2', 'site_manager',
+    ARRAY[t.site(8)], t.id('admin'), t.h('s1bre4'));
+  PERFORM t.revoke_as(v_inv, t.id('admin'));
+  v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('s1bre5'), 'Re2',
+    'recycler', NULL);
+  ASSERT t.status(v_new) = 'pending' AND t.sites_of(v_u) = '{}';
+  PERFORM t.pass('reissue: collector/site_manager need >= 1 site ({} and NULL refused, nothing changed); recycler may be reissued with 0 sites and then consumed');
+END $$;
