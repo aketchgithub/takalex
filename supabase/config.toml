@@ -37,5 +37,5 @@ max_client_conn = 200
 [storage.vector]
 enabled = false
 
-[functions.invite-collector]
+[functions.invite-user]
 verify_jwt = true

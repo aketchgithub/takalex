@@ -188,9 +188,10 @@ return <Redirect href="/(collector)" />;
 - The Expo app lives in `apps/mobile`. Copy `.env.example` to `.env.local` there
   and set `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
   The service-role key must never be added to the mobile app.
-- Accounts are invite-only. An active admin sends collector invitations from the
-  Admin workspace; the `invite-collector` Edge Function checks the caller's
-  profile before using the server-side Auth Admin API. Migration
+- Accounts are invite-only. An active admin creates invitations from the
+  Admin workspace; the `invite-user` Edge Function confirms the caller is an
+  active admin before using the server-side Auth Admin API, and returns a
+  one-time invitation code (only its SHA-256 hash is stored). Migration
   `002_auth_profiles.sql` creates collector profiles for invited Auth users and
   lets each user read only their own profile.
 - Bootstrap the first admin by creating their Auth user in the Supabase

@@ -77,4 +77,5 @@ The demo brief and confirmed operating model are in docs/demo-plan.md; read it b
 - apps/mobile/src/stores/authStore.ts — Zustand auth state
 - apps/mobile/src/lib — supabase client, secure storage, access/sites helpers
 - supabase/migrations — 001..004; editing rules in "Migration policy" above
-- supabase/functions/invite-collector — admin invite Edge Function
+- supabase/functions/invite-user — admin invite Edge Function (create/reissue, code-based)
+- supabase/scripts/dev-admin.sh — local-only first-admin bootstrap
