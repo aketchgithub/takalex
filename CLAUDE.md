@@ -32,7 +32,11 @@ The demo brief and confirmed operating model are in docs/demo-plan.md; read it b
 - Roles: collector, site_manager, recycler, admin. RLS on every table; explicit GRANTs
   are needed because automatic table exposure is disabled on the project.
 - Users can be assigned to multiple sites via `user_sites` (admin-managed). 9 sites at launch, more later.
-- Materials PET, HDPE, LDPE, MIXED — avoid hardcoding so more can be added.
+- Materials are rows in the `materials` lookup table (not an enum or hardcoded list), with
+  `is_reportable`, `is_verifiable`, `is_recycler_visible` and `is_active` flags, so types can be
+  added later. PET, PP, HDPE, LDPE and PLASTIC_BAGS are reportable, verifiable and
+  recycler-visible. MIXED is reportable by collectors but can never be used in a verified
+  breakdown or shown to recyclers. OTHER/residue stays excluded pending Chemolex confirmation.
 - Collector-reported weight and site-manager-verified weight are separate fields.
   Collector weight must never determine payout. Only approved + verified collections
   are payment-eligible. Status changes and verified weight go through a server-side

@@ -1,5 +1,6 @@
--- COLLECTIONS: insert integrity, offline idempotency, review RPC, payout
--- eligibility, finality, audit events, RLS reads and evidence (migration 001).
+-- COLLECTIONS: insert integrity, offline idempotency, review RPC with the
+-- verified breakdown, payout eligibility, finality, audit events, RLS reads,
+-- evidence, materials and device location (migration 001).
 SET client_min_messages = notice;
 
 DO $$ BEGIN
@@ -33,12 +34,12 @@ DO $$ BEGIN
 END $$;
 
 CREATE FUNCTION t.submit(p_user UUID, p_key TEXT, p_site UUID,
-                         p_material public.material_type, p_kg NUMERIC)
+                         p_material TEXT, p_kg NUMERIC)
 RETURNS UUID LANGUAGE plpgsql AS $$
 DECLARE v_rec UUID := gen_random_uuid(); v_id UUID;
 BEGIN
   PERFORM t.as_user(p_user);
-  INSERT INTO public.collection_logs (client_record_id, site_id, material,
+  INSERT INTO public.collection_logs (client_record_id, site_id, material_code,
                                       reported_weight_kg, captured_at)
   VALUES (v_rec, p_site, p_material, p_kg, now() - interval '1 hour');
   PERFORM t.become('postgres');
@@ -49,12 +50,52 @@ BEGIN
 END $$;
 
 CREATE FUNCTION t.review_as(p_user UUID, p_id UUID, p_ok BOOLEAN,
-                            p_kg NUMERIC, p_reason TEXT)
+                            p_items JSONB, p_reason TEXT)
 RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM t.as_user(p_user);
-  PERFORM public.review_collection(p_id, p_ok, p_kg, p_reason);
+  PERFORM public.review_collection(p_id, p_ok, p_items, p_reason);
   PERFORM t.become('postgres');
+END $$;
+
+-- Ground-truth evidence row for a collection (as the owner), so approval
+-- tests can satisfy the evidence requirement.
+CREATE FUNCTION t.add_evidence(p_id UUID) RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+  VALUES (p_id, 'test/' || p_id || '/' || gen_random_uuid() || '.jpg', 'image/jpeg')
+$$;
+
+-- Ground truth (no RLS) for one collection.
+CREATE FUNCTION t.item_count(p_id UUID) RETURNS BIGINT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+  SELECT count(*) FROM public.collection_verified_items WHERE collection_id = p_id
+$$;
+
+CREATE FUNCTION t.event_count(p_id UUID) RETURNS BIGINT
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+  SELECT count(*) FROM public.collection_events WHERE collection_id = p_id
+$$;
+
+-- Expect review_collection to fail with a message matching p_like, and to
+-- leave the collection pending with no lines and no new events.
+CREATE FUNCTION t.review_fails(p_user UUID, p_id UUID, p_ok BOOLEAN,
+                               p_items JSONB, p_reason TEXT, p_like TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE v_events BIGINT := t.event_count(p_id);
+BEGIN
+  BEGIN
+    PERFORM t.review_as(p_user, p_id, p_ok, p_items, p_reason);
+    RAISE EXCEPTION USING ERRCODE = 'T0002',
+      MESSAGE = format('review succeeded: items=%s reason=%s', p_items, p_reason);
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM LIKE p_like,
+      format('items=%s: expected "%s", got "%s"', p_items, p_like, SQLERRM);
+  END;
+  PERFORM t.become('postgres');
+  ASSERT (SELECT status FROM public.collection_logs WHERE id = p_id) = 'pending', 'status changed';
+  ASSERT t.item_count(p_id) = 0, 'lines written';
+  ASSERT t.event_count(p_id) = v_events, 'event written';
 END $$;
 
 -- 1
@@ -96,7 +137,7 @@ BEGIN
     BEGIN
       PERFORM t.as_user(t.id('c1'));
       EXECUTE format(
-        'INSERT INTO public.collection_logs (client_record_id, site_id, material, reported_weight_kg, %I)
+        'INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg, %I)
          VALUES (gen_random_uuid(), %L, ''PET'', 1, %s)', c, t.site(1), v);
       RAISE EXCEPTION 'collector could set %', c;
     EXCEPTION WHEN insufficient_privilege THEN NULL;
@@ -123,7 +164,7 @@ BEGIN
   END LOOP;
   BEGIN
     PERFORM t.become('anon');
-    INSERT INTO public.collection_logs (client_record_id, site_id, material, reported_weight_kg)
+    INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg)
     VALUES (gen_random_uuid(), t.site(1), 'PET', 1);
     RAISE EXCEPTION 'anon could submit';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
@@ -137,13 +178,13 @@ DECLARE v_rec UUID := t.id('col_a_rec'); n BIGINT;
 BEGIN
   BEGIN
     PERFORM t.as_user(t.id('c1'));
-    INSERT INTO public.collection_logs (client_record_id, site_id, material, reported_weight_kg)
+    INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg)
     VALUES (v_rec, t.site(1), 'HDPE', 3);
     RAISE EXCEPTION 'duplicate offline key accepted';
   EXCEPTION WHEN unique_violation THEN NULL;
   END;
   PERFORM t.as_user(t.id('c2'));
-  INSERT INTO public.collection_logs (client_record_id, site_id, material, reported_weight_kg)
+  INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg)
   VALUES (v_rec, t.site(2), 'HDPE', 3);
   PERFORM t.become('postgres');
   SELECT count(*) INTO n FROM public.collection_logs WHERE client_record_id = v_rec;
@@ -178,7 +219,7 @@ END $$;
 DO $$
 DECLARE r public.collection_logs; v_rec UUID := gen_random_uuid();
 BEGIN
-  INSERT INTO public.collection_logs (client_record_id, collector_id, site_id, material,
+  INSERT INTO public.collection_logs (client_record_id, collector_id, site_id, material_code,
     reported_weight_kg, verified_weight_kg, status, payment_eligible, verified_by,
     verified_at, submitted_at, created_at)
   VALUES (v_rec, t.id('c1'), t.site(1), 'LDPE', 5, 99, 'approved', true, t.id('m1'),
@@ -240,72 +281,76 @@ BEGIN
   PERFORM t.pass('no direct UPDATE/DELETE on collections or writes to events for any client role; anon reads nothing');
 END $$;
 
--- 8
+-- 8: multi-line verified breakdown; the total is computed in the database
 DO $$
-DECLARE r public.collection_logs; e public.collection_events;
+DECLARE r public.collection_logs; e public.collection_events; v_sum NUMERIC; v_n BIGINT;
 BEGIN
-  PERFORM t.review_as(t.id('m1'), t.id('col_a'), true, 11.75, NULL);
+  PERFORM t.add_evidence(t.id('col_a'));
+  -- reported: PET 12.5 kg; verified after sorting: PET 8.25 + plastic bags 3.50
+  PERFORM t.review_as(t.id('m1'), t.id('col_a'), true,
+    '[{"material_code": "PLASTIC_BAGS", "weight_kg": 3.50},
+      {"material_code": "PET", "weight_kg": 8.25}]', NULL);
   SELECT * INTO STRICT r FROM public.collection_logs WHERE id = t.id('col_a');
   ASSERT r.status = 'approved' AND r.payment_eligible = true;
   ASSERT r.verified_weight_kg = 11.75 AND r.reported_weight_kg = 12.5, 'weights kept separate';
+  ASSERT r.material_code = 'PET', 'reported material unchanged';
   ASSERT r.verified_by = t.id('m1') AND r.verified_at = now();
   ASSERT r.rejection_reason IS NULL;
+  SELECT sum(weight_kg), count(*) INTO v_sum, v_n
+  FROM public.collection_verified_items WHERE collection_id = t.id('col_a');
+  ASSERT v_n = 2, 'two lines stored, got ' || v_n;
+  ASSERT v_sum = r.verified_weight_kg, 'verified total equals the sum of the lines';
+  ASSERT (SELECT weight_kg FROM public.collection_verified_items
+          WHERE collection_id = t.id('col_a') AND material_code = 'PET') = 8.25;
+  ASSERT (SELECT weight_kg FROM public.collection_verified_items
+          WHERE collection_id = t.id('col_a') AND material_code = 'PLASTIC_BAGS') = 3.50;
   SELECT * INTO STRICT e FROM public.collection_events
   WHERE collection_id = t.id('col_a') AND action = 'approved';
   ASSERT e.actor_id = t.id('m1');
   ASSERT e.details->>'previous_status' = 'pending' AND e.details->>'new_status' = 'approved';
+  ASSERT e.details->>'reported_material_code' = 'PET';
   ASSERT (e.details->>'reported_weight_kg')::numeric = 12.5;
   ASSERT (e.details->>'verified_weight_kg')::numeric = 11.75;
+  ASSERT e.details->'verified_items' = '[{"material_code": "PET", "weight_kg": 8.25},
+                                         {"material_code": "PLASTIC_BAGS", "weight_kg": 3.50}]'::jsonb,
+    'event breakdown: ' || (e.details->'verified_items')::text;
   ASSERT (e.details->>'payment_eligible')::boolean;
-  PERFORM t.pass('site manager approval: verified weight separate from reported, payout eligible, approved event with actor');
+  PERFORM t.pass('site manager approval with a 2-line breakdown: lines stored, total = sum of lines, reported values unchanged, event records both');
 END $$;
 
 -- 9
 DO $$
-DECLARE v_id UUID; v_events BIGINT;
+DECLARE v_id UUID;
 BEGIN
   v_id := t.submit(t.id('c1'), 'col_b', t.site(1), 'HDPE', 4);
-  SELECT count(*) INTO v_events FROM public.collection_events WHERE collection_id = v_id;
-  BEGIN
-    PERFORM t.review_as(t.id('m1'), v_id, true, NULL, NULL);
-    RAISE EXCEPTION 'approved without weight';
-  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'A valid verified weight%', SQLERRM; END;
-  BEGIN
-    PERFORM t.review_as(t.id('m1'), v_id, true, 0, NULL);
-    RAISE EXCEPTION 'approved with zero weight';
-  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'A valid verified weight%', SQLERRM; END;
-  BEGIN
-    PERFORM t.review_as(t.id('m1'), v_id, true, -1, NULL);
-    RAISE EXCEPTION 'approved with negative weight';
-  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'A valid verified weight%', SQLERRM; END;
-  BEGIN
-    PERFORM t.review_as(t.id('m1'), v_id, false, NULL, NULL);
-    RAISE EXCEPTION 'rejected without reason';
-  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'A rejection reason is required', SQLERRM; END;
-  BEGIN
-    PERFORM t.review_as(t.id('m1'), v_id, false, NULL, '   ');
-    RAISE EXCEPTION 'rejected with blank reason';
-  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'A rejection reason is required', SQLERRM; END;
-  ASSERT (SELECT status FROM public.collection_logs WHERE id = v_id) = 'pending';
-  ASSERT (SELECT count(*) FROM public.collection_events WHERE collection_id = v_id) = v_events;
-  PERFORM t.pass('approval needs a positive verified weight; rejection needs a non-blank reason; failures change nothing');
+  PERFORM t.add_evidence(v_id);
+  PERFORM t.review_fails(t.id('m1'), v_id, true, NULL, NULL, 'The verified breakdown must be a JSON array%');
+  PERFORM t.review_fails(t.id('m1'), v_id, true, '[]', NULL, 'At least one verified breakdown line is required%');
+  PERFORM t.review_fails(t.id('m1'), v_id, false, NULL, NULL, 'A rejection reason is required');
+  PERFORM t.review_fails(t.id('m1'), v_id, false, NULL, '   ', 'A rejection reason is required');
+  PERFORM t.review_fails(t.id('m1'), v_id, NULL, NULL, 'x', 'An approval decision is required');
+  PERFORM t.pass('approval needs breakdown lines; rejection needs a non-blank reason; a decision is required; failures change nothing');
 END $$;
 
 -- 10
 DO $$
 DECLARE r public.collection_logs; e public.collection_events;
 BEGIN
-  PERFORM t.review_as(t.id('m1'), t.id('col_b'), false, 3, '  Contaminated load  ');
+  PERFORM t.review_as(t.id('m1'), t.id('col_b'), false, '[]', '  Contaminated load  ');
   SELECT * INTO STRICT r FROM public.collection_logs WHERE id = t.id('col_b');
   ASSERT r.status = 'rejected' AND r.payment_eligible = false;
   ASSERT r.rejection_reason = 'Contaminated load', 'reason trimmed';
-  ASSERT r.verified_weight_kg IS NULL, 'rejection ignores weight';
+  ASSERT r.verified_weight_kg IS NULL, 'rejection has no verified total';
+  ASSERT t.item_count(r.id) = 0, 'rejection stores no lines';
   ASSERT r.verified_by = t.id('m1') AND r.verified_at IS NOT NULL;
   SELECT * INTO STRICT e FROM public.collection_events
   WHERE collection_id = t.id('col_b') AND action = 'rejected';
   ASSERT e.actor_id = t.id('m1') AND e.details->>'rejection_reason' = 'Contaminated load';
+  ASSERT e.details->>'reported_material_code' = 'HDPE';
+  ASSERT (e.details->>'reported_weight_kg')::numeric = 4;
+  ASSERT e.details->'verified_items' = '[]'::jsonb;
   ASSERT NOT (e.details->>'payment_eligible')::boolean;
-  PERFORM t.pass('rejection: trimmed reason, not payout eligible, rejected event with actor and reason');
+  PERFORM t.pass('rejection: trimmed reason, no lines, not payout eligible, rejected event with actor, reason and reported values');
 END $$;
 
 -- 11
@@ -313,9 +358,10 @@ DO $$
 DECLARE v_id UUID; u TEXT;
 BEGIN
   v_id := t.submit(t.id('c1'), 'col_c', t.site(1), 'MIXED', 7);
+  PERFORM t.add_evidence(v_id);
   FOREACH u IN ARRAY ARRAY['m2', 'c1', 'r1', 'm_off', 'c2'] LOOP
     BEGIN
-      PERFORM t.review_as(t.id(u), v_id, true, 7, NULL);
+      PERFORM t.review_as(t.id(u), v_id, true, '[{"material_code": "PET", "weight_kg": 7}]', NULL);
       RAISE EXCEPTION '% could review', u;
     EXCEPTION WHEN raise_exception THEN
       ASSERT SQLERRM = 'You are not authorised to review this collection', u || ': ' || SQLERRM;
@@ -323,7 +369,7 @@ BEGIN
   END LOOP;
   BEGIN
     PERFORM t.become('anon');
-    PERFORM public.review_collection(v_id, true, 7, NULL);
+    PERFORM public.review_collection(v_id, true, '[{"material_code": "PET", "weight_kg": 7}]', NULL);
     RAISE EXCEPTION 'anon could review';
   EXCEPTION
     WHEN insufficient_privilege THEN NULL;
@@ -332,15 +378,17 @@ BEGIN
   END;
   ASSERT (SELECT status FROM public.collection_logs WHERE id = v_id) = 'pending';
   ASSERT (SELECT count(*) FROM public.collection_events WHERE collection_id = v_id) = 1;
+  ASSERT t.item_count(v_id) = 0;
   PERFORM t.pass('other-site manager, own collector, recycler, inactive manager and anon cannot review');
 END $$;
 
--- 12
+-- 12 (existing behaviour, unchanged: can_review_site includes active admins)
 DO $$ BEGIN
-  PERFORM t.review_as(t.id('admin'), t.id('col_c'), true, 6.5, NULL);
-  ASSERT (SELECT status = 'approved' AND verified_by = t.id('admin')
+  PERFORM t.review_as(t.id('admin'), t.id('col_c'), true, '[{"material_code": "PP", "weight_kg": 6.5}]', NULL);
+  ASSERT (SELECT status = 'approved' AND verified_by = t.id('admin') AND verified_weight_kg = 6.5
+                 AND material_code = 'MIXED'
           FROM public.collection_logs WHERE id = t.id('col_c'));
-  PERFORM t.pass('an active admin can review a collection at any site');
+  PERFORM t.pass('an active admin can review a collection at any site (MIXED reported, PP verified)');
 END $$;
 
 -- 13
@@ -457,8 +505,8 @@ BEGIN
   SELECT id INTO STRICT v_c2 FROM public.collection_logs
   WHERE collector_id = t.id('c2') LIMIT 1;
   PERFORM t.as_user(t.id('c1'));
-  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, latitude, longitude)
-  VALUES (t.id('col_forged'), 'c1/forged/1.jpg', 'image/jpeg', -1.29, 36.82);
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+  VALUES (t.id('col_forged'), 'c1/forged/1.jpg', 'image/jpeg');
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
     VALUES (v_c2, 'c1/other/1.jpg', 'image/jpeg');
@@ -469,11 +517,6 @@ BEGIN
     VALUES (t.id('col_a'), 'c1/approved/1.jpg', 'image/jpeg');
     RAISE EXCEPTION 'evidence on a reviewed row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
-  BEGIN
-    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, latitude)
-    VALUES (t.id('col_forged'), 'c1/forged/2.jpg', 'image/jpeg', 91);
-    RAISE EXCEPTION 'latitude 91 accepted';
-  EXCEPTION WHEN check_violation THEN NULL; END;
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
     VALUES (t.id('col_forged'), 'c1/forged/1.jpg', 'image/jpeg');
@@ -491,8 +534,14 @@ BEGIN
     ASSERT n = 0, 'collector deleted evidence';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM t.become('postgres');
-  ASSERT (SELECT count(*) FROM public.collection_evidence) = 1;
-  PERFORM t.pass('evidence: own pending collections only, coordinates checked, paths unique, no update/delete');
+  -- (other collections carry owner-inserted evidence from t.add_evidence)
+  ASSERT (SELECT count(*) FROM public.collection_evidence WHERE collection_id = t.id('col_forged')) = 1;
+  ASSERT (SELECT count(*) FROM public.collection_evidence WHERE storage_path LIKE 'c1/%') = 1;
+  ASSERT NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'collection_evidence'
+                       AND column_name IN ('latitude', 'longitude')),
+    'evidence still has its own coordinates (location belongs on collection_logs)';
+  PERFORM t.pass('evidence: own pending collections only, paths unique, no update/delete, no duplicate coordinate columns');
 END $$;
 
 -- 18
@@ -566,7 +615,7 @@ BEGIN
   WHERE collection_id = r.id AND action = 'submitted';
   ASSERT e.actor_id = r.collector_id;
   ASSERT (e.details->>'site_id')::uuid = r.site_id, 'site_id';
-  ASSERT e.details->>'material' = r.material::text, 'material';
+  ASSERT e.details->>'material_code' = r.material_code, 'material_code';
   ASSERT (e.details->>'reported_weight_kg')::numeric = r.reported_weight_kg, 'weight';
   ASSERT (e.details->>'captured_at')::timestamptz = r.captured_at, 'captured_at';
   ASSERT (e.details->>'client_record_id')::uuid = r.client_record_id, 'client_record_id';
@@ -639,7 +688,8 @@ END $$;
 DO $$
 DECLARE
   col TEXT;
-  v_insert TEXT[] := ARRAY['client_record_id', 'site_id', 'material', 'reported_weight_kg', 'captured_at'];
+  v_insert TEXT[] := ARRAY['client_record_id', 'site_id', 'material_code', 'reported_weight_kg', 'captured_at',
+                           'device_latitude', 'device_longitude', 'device_accuracy_m'];
 BEGIN
   FOR col IN SELECT attname FROM pg_attribute
              WHERE attrelid = 'public.collection_logs'::regclass AND attnum > 0 AND NOT attisdropped LOOP
@@ -662,5 +712,370 @@ BEGIN
       'authenticated write on events.' || col;
   END LOOP;
   ASSERT NOT has_table_privilege('anon', 'public.collection_events', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE');
-  PERFORM t.pass('catalog: collectors INSERT exactly 5 columns, no UPDATE/DELETE; events read-only; anon nothing');
+  PERFORM t.pass('catalog: collectors INSERT exactly 8 columns, no UPDATE/DELETE; events read-only; anon nothing');
+END $$;
+
+-- ============================================================ S1a: materials, breakdown, location
+-- 24: approval without evidence
+DO $$
+DECLARE v_id UUID;
+BEGIN
+  v_id := t.submit(t.id('c1'), 'col_d', t.site(1), 'MIXED', 9);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_evidence WHERE collection_id = v_id);
+  PERFORM t.review_fails(t.id('m1'), v_id, true, '[{"material_code": "PET", "weight_kg": 5}]', NULL,
+                         'At least one photo evidence record is required for approval');
+  -- rejection does not need evidence (nothing becomes payable)
+  PERFORM t.add_evidence(v_id);    -- used by the next tests
+  PERFORM t.pass('approval is refused without an evidence row, and nothing is written');
+END $$;
+
+-- 25: malformed breakdown JSON (non-array, wrong shape, unknown/missing keys)
+DO $$
+DECLARE v_id UUID := t.id('col_d'); j TEXT;
+BEGIN
+  FOREACH j IN ARRAY ARRAY['{}', '{"material_code": "PET", "weight_kg": 1}', '"PET"', '5', 'null'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true, j::jsonb, NULL, 'The verified breakdown must be a JSON array%');
+  END LOOP;
+  FOREACH j IN ARRAY ARRAY[
+    '[1]', '["PET"]', '[null]', '[[]]',
+    '[{"material_code": "PET"}]',
+    '[{"weight_kg": 1}]',
+    '[{"material_code": "PET", "weight_kg": 1, "note": "x"}]',
+    '[{"material_code": "PET", "weight_kg": 1, "verified_weight_kg": 99}]',
+    '[{"material": "PET", "weight_kg": 1}]'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true, j::jsonb, NULL,
+                           'Each verified breakdown line must have exactly material_code and weight_kg');
+  END LOOP;
+  FOREACH j IN ARRAY ARRAY['[{"material_code": 1, "weight_kg": 1}]',
+                           '[{"material_code": null, "weight_kg": 1}]'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true, j::jsonb, NULL, 'material_code must be a string');
+  END LOOP;
+  PERFORM t.pass('malformed breakdowns rejected: non-array, non-object lines, missing/unknown keys, non-string codes');
+END $$;
+
+-- 26: unverifiable materials (MIXED, inactive, unknown)
+DO $$
+DECLARE v_id UUID := t.id('col_d');
+BEGIN
+  INSERT INTO public.materials (code, display_name, is_reportable, is_verifiable, is_recycler_visible, is_active)
+  VALUES ('ZZ_RETIRED', 'Retired test type', true, true, false, false);
+  PERFORM t.review_fails(t.id('m1'), v_id, true, '[{"material_code": "MIXED", "weight_kg": 2}]', NULL,
+                         'Material MIXED cannot be used in a verified breakdown');
+  PERFORM t.review_fails(t.id('m1'), v_id, true,
+                         '[{"material_code": "PET", "weight_kg": 1}, {"material_code": "ZZ_RETIRED", "weight_kg": 2}]', NULL,
+                         'Material ZZ_RETIRED cannot be used in a verified breakdown');
+  PERFORM t.review_fails(t.id('m1'), v_id, true, '[{"material_code": "OTHER", "weight_kg": 2}]', NULL,
+                         'Unknown material code OTHER');
+  PERFORM t.review_fails(t.id('m1'), v_id, true, '[{"material_code": "pet", "weight_kg": 2}]', NULL,
+                         'Unknown material code pet');
+  PERFORM t.pass('verified breakdown refuses MIXED, inactive and unknown material codes (case-sensitive)');
+END $$;
+
+-- 27: duplicate materials
+DO $$ BEGIN
+  PERFORM t.review_fails(t.id('m1'), t.id('col_d'), true,
+    '[{"material_code": "PET", "weight_kg": 1}, {"material_code": "HDPE", "weight_kg": 2},
+      {"material_code": "PET", "weight_kg": 3}]', NULL,
+    'Material PET appears more than once in the verified breakdown');
+  PERFORM t.pass('duplicate material codes in one breakdown are refused');
+END $$;
+
+-- 28: zero, negative, non-numeric and out-of-range weights
+DO $$
+DECLARE v_id UUID := t.id('col_d'); w TEXT;
+BEGIN
+  FOREACH w IN ARRAY ARRAY['0', '0.00', '-1', '-0.01'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true,
+      format('[{"material_code": "PET", "weight_kg": %s}]', w)::jsonb, NULL,
+      'weight_kg for PET must be greater than zero');
+  END LOOP;
+  FOREACH w IN ARRAY ARRAY['"3.5"', 'null', 'true', '[]', '{}'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true,
+      format('[{"material_code": "PET", "weight_kg": %s}]', w)::jsonb, NULL,
+      'weight_kg for PET must be a number');
+  END LOOP;
+  PERFORM t.review_fails(t.id('m1'), v_id, true,
+    '[{"material_code": "PET", "weight_kg": 100000000}]', NULL, 'weight_kg for PET is too large');
+  PERFORM t.pass('weights must be JSON numbers > 0 and within NUMERIC(10,2)');
+END $$;
+
+-- 29: more than two decimal places is refused, never rounded; a valid
+-- breakdown with 1 and 2 decimals then succeeds
+DO $$
+DECLARE v_id UUID := t.id('col_d'); w TEXT;
+BEGIN
+  FOREACH w IN ARRAY ARRAY['1.005', '0.001', '2.999', '1e-3', '3.141'] LOOP
+    PERFORM t.review_fails(t.id('m1'), v_id, true,
+      format('[{"material_code": "PET", "weight_kg": %s}]', w)::jsonb, NULL,
+      'weight_kg for PET must have at most 2 decimal places');
+  END LOOP;
+  PERFORM t.review_as(t.id('m1'), v_id, true,
+    '[{"material_code": "HDPE", "weight_kg": 2.25}, {"material_code": "LDPE", "weight_kg": 1.5},
+      {"material_code": "PP", "weight_kg": 4.00}, {"material_code": "PET", "weight_kg": 1.10}]', NULL);
+  ASSERT (SELECT verified_weight_kg FROM public.collection_logs WHERE id = v_id) = 8.85;
+  ASSERT (SELECT sum(weight_kg) FROM public.collection_verified_items WHERE collection_id = v_id) = 8.85;
+  ASSERT t.item_count(v_id) = 4;
+  PERFORM t.pass('weights with more than 2 decimals are refused (no rounding); a valid 4-line breakdown totals 8.85');
+END $$;
+
+-- 30: rejection with breakdown lines is refused
+DO $$
+DECLARE v_id UUID;
+BEGIN
+  v_id := t.submit(t.id('c1'), 'col_e', t.site(1), 'PET', 3);
+  PERFORM t.add_evidence(v_id);
+  PERFORM t.review_fails(t.id('m1'), v_id, false, '[{"material_code": "PET", "weight_kg": 3}]', 'Wet load',
+                         'A rejected collection cannot have a verified breakdown');
+  PERFORM t.review_fails(t.id('m1'), v_id, false, '{}', 'Wet load',
+                         'A rejected collection cannot have a verified breakdown');
+  PERFORM t.pass('rejection refuses breakdown lines (only NULL or [] are accepted)');
+END $$;
+
+-- 31: nobody writes verified lines directly; lines are never changed
+DO $$
+DECLARE u TEXT; n BIGINT;
+BEGIN
+  FOREACH u IN ARRAY ARRAY['c1', 'm1', 'admin', 'r1'] LOOP
+    BEGIN
+      PERFORM t.as_user(t.id(u));
+      INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+      VALUES (t.id('col_e'), 'PET', 3);
+      RAISE EXCEPTION '% inserted a verified line', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+    BEGIN
+      PERFORM t.as_user(t.id(u));
+      UPDATE public.collection_verified_items SET weight_kg = 99;
+      RAISE EXCEPTION '% updated verified lines', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+    BEGIN
+      PERFORM t.as_user(t.id(u));
+      DELETE FROM public.collection_verified_items;
+      RAISE EXCEPTION '% deleted verified lines', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+  FOREACH u IN ARRAY ARRAY['anon', 'service_role'] LOOP
+    BEGIN
+      PERFORM t.become(u);
+      INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+      VALUES (t.id('col_e'), 'PET', 3);
+      RAISE EXCEPTION '% inserted a verified line', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+  PERFORM t.become('postgres');
+  -- even the owner: no updates, no lines on reviewed collections, no unverifiable materials, no duplicates
+  BEGIN
+    UPDATE public.collection_verified_items SET weight_kg = 99 WHERE collection_id = t.id('col_a');
+    RAISE EXCEPTION 'owner updated a verified line';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Verified breakdown lines cannot be changed', SQLERRM; END;
+  BEGIN
+    INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+    VALUES (t.id('col_a'), 'HDPE', 1);
+    RAISE EXCEPTION 'owner added a line to an approved collection';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'Verified breakdown lines can only be added to a pending collection', SQLERRM; END;
+  BEGIN
+    INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+    VALUES (t.id('col_e'), 'MIXED', 1);
+    RAISE EXCEPTION 'owner added a MIXED line';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'Material MIXED cannot be used in a verified breakdown', SQLERRM; END;
+  BEGIN
+    INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+    VALUES (t.id('col_e'), 'PET', 0);
+    RAISE EXCEPTION 'owner added a zero-weight line';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    INSERT INTO public.collection_verified_items (collection_id, material_code, weight_kg)
+    VALUES (t.id('col_e'), 'PET', 1), (t.id('col_e'), 'PET', 2);
+    RAISE EXCEPTION 'owner added duplicate lines';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  ASSERT (SELECT weight_kg FROM public.collection_verified_items
+          WHERE collection_id = t.id('col_a') AND material_code = 'PET') = 8.25;
+  ASSERT t.item_count(t.id('col_e')) = 0;
+  ASSERT NOT has_table_privilege('authenticated', 'public.collection_verified_items', 'INSERT, UPDATE, DELETE, TRUNCATE');
+  ASSERT NOT has_any_column_privilege('authenticated', 'public.collection_verified_items', 'INSERT, UPDATE');
+  ASSERT NOT has_table_privilege('service_role', 'public.collection_verified_items', 'SELECT, INSERT, UPDATE, DELETE');
+  ASSERT NOT has_table_privilege('anon', 'public.collection_verified_items', 'SELECT, INSERT, UPDATE, DELETE');
+  PERFORM t.pass('verified lines: no client or service_role writes; never updated; only pending + verifiable + unique + positive, even for the owner');
+END $$;
+
+-- 32: materials lookup: contents, read access, no writes
+DO $$
+DECLARE u TEXT; n BIGINT;
+BEGIN
+  ASSERT (SELECT string_agg(format('%s:%s%s%s%s', code,
+            is_reportable::int, is_verifiable::int, is_recycler_visible::int, is_active::int), ',' ORDER BY sort_order)
+          FROM public.materials WHERE code NOT LIKE 'ZZ\_%')
+       = 'PET:1111,PP:1111,HDPE:1111,LDPE:1111,PLASTIC_BAGS:1111,MIXED:1001',
+    'seeded materials/flags differ';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.materials WHERE code IN ('OTHER', 'RESIDUE'));
+  ASSERT to_regtype('public.material_type') IS NULL, 'the old material_type enum still exists';
+  FOREACH u IN ARRAY ARRAY['c1', 'm1', 'r1', 'admin', 'c_off'] LOOP
+    PERFORM t.as_user(t.id(u));
+    SELECT count(*) INTO n FROM public.materials WHERE code NOT LIKE 'ZZ\_%';
+    ASSERT n = 6, u || ' sees ' || n || ' materials';
+    BEGIN
+      INSERT INTO public.materials (code, display_name) VALUES ('ZZ_NEW', 'x');
+      RAISE EXCEPTION '% inserted a material', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+    BEGIN
+      UPDATE public.materials SET is_verifiable = true WHERE code = 'MIXED';
+      RAISE EXCEPTION '% updated a material', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+    BEGIN
+      DELETE FROM public.materials WHERE code = 'PET';
+      RAISE EXCEPTION '% deleted a material', u;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+  BEGIN
+    PERFORM t.become('anon');
+    PERFORM 1 FROM public.materials;
+    RAISE EXCEPTION 'anon read materials';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.become('service_role');
+    PERFORM 1 FROM public.materials;
+    RAISE EXCEPTION 'service_role read materials';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  PERFORM t.become('postgres');
+  BEGIN
+    INSERT INTO public.materials (code, display_name, is_verifiable, is_recycler_visible)
+    VALUES ('ZZ_BAD', 'x', false, true);
+    RAISE EXCEPTION 'recycler-visible but unverifiable material accepted';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    INSERT INTO public.materials (code, display_name) VALUES ('lower case', 'x');
+    RAISE EXCEPTION 'badly formatted code accepted';
+  EXCEPTION WHEN check_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.materials SET code = 'PETX' WHERE code = 'PET';
+    RAISE EXCEPTION 'a referenced material code was renamed';
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+  PERFORM t.pass('materials: 6 seeded types with exact flags, no OTHER, enum gone; every signed-in user reads; nobody but the owner writes; anon/service_role denied');
+END $$;
+
+-- 33: submissions only accept active, reportable materials
+DO $$
+DECLARE v_code TEXT;
+BEGIN
+  INSERT INTO public.materials (code, display_name, is_reportable, is_verifiable, is_active)
+  VALUES ('ZZ_VERIFY_ONLY', 'Verify-only test type', false, true, true),
+         ('ZZ_OLD_REPORTABLE', 'Inactive reportable test type', true, false, false);
+  FOREACH v_code IN ARRAY ARRAY['ZZ_VERIFY_ONLY', 'ZZ_OLD_REPORTABLE', 'NOPE', 'pet'] LOOP
+    BEGIN
+      PERFORM t.submit(t.id('c1'), 'x', t.site(1), v_code, 1);
+      RAISE EXCEPTION 'submission with % accepted', v_code;
+    EXCEPTION WHEN check_violation THEN
+      ASSERT SQLERRM = format('Material %s cannot be reported', v_code), SQLERRM;
+    END;
+  END LOOP;
+  -- every seeded reportable type is accepted, including MIXED
+  FOREACH v_code IN ARRAY ARRAY['PET', 'PP', 'HDPE', 'LDPE', 'PLASTIC_BAGS', 'MIXED'] LOOP
+    PERFORM t.submit(t.id('c2'), 'x', t.site(2), v_code, 1);
+  END LOOP;
+  PERFORM t.pass('collection submissions refuse inactive, non-reportable and unknown materials; all 6 seeded types are reportable');
+END $$;
+
+-- 34: device location: validation, storage, audit and immutability
+DO $$
+DECLARE r public.collection_logs; e public.collection_events; v_rec UUID := gen_random_uuid();
+        bad TEXT; n BIGINT;
+BEGIN
+  PERFORM t.as_user(t.id('c1'));
+  INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg,
+                                      device_latitude, device_longitude, device_accuracy_m)
+  VALUES (v_rec, t.site(1), 'PET', 2, -1.2921, 36.8219, 12.5);
+  PERFORM t.become('postgres');
+  SELECT * INTO STRICT r FROM public.collection_logs WHERE client_record_id = v_rec;
+  PERFORM t.put('col_loc', r.id);
+  ASSERT r.device_latitude = -1.2921 AND r.device_longitude = 36.8219 AND r.device_accuracy_m = 12.5;
+  SELECT * INTO STRICT e FROM public.collection_events WHERE collection_id = r.id AND action = 'submitted';
+  ASSERT (e.details->>'device_latitude')::float8 = -1.2921
+     AND (e.details->>'device_longitude')::float8 = 36.8219
+     AND (e.details->>'device_accuracy_m')::float8 = 12.5, 'location in submitted event';
+
+  -- boundaries and "permission denied" (all NULL) are accepted
+  PERFORM t.as_user(t.id('c1'));
+  INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg,
+                                      device_latitude, device_longitude, device_accuracy_m)
+  VALUES (gen_random_uuid(), t.site(1), 'PET', 1, -90, 180, 0),
+         (gen_random_uuid(), t.site(1), 'PET', 1, 90, -180, NULL),
+         (gen_random_uuid(), t.site(1), 'PET', 1, NULL, NULL, NULL);
+
+  FOREACH bad IN ARRAY ARRAY[
+    '90.0001, 0, NULL', '-91, 0, NULL', '0, 180.5, NULL', '0, -181, NULL',
+    '1, NULL, NULL', 'NULL, 1, NULL', '1, 1, -0.1', 'NULL, NULL, 5',
+    '''NaN''::float8, 0, NULL', '0, ''NaN''::float8, NULL', '1, 1, ''NaN''::float8',
+    '1, 1, ''Infinity''::float8', '''Infinity''::float8, 0, NULL'] LOOP
+    BEGIN
+      PERFORM t.as_user(t.id('c1'));
+      EXECUTE format(
+        'INSERT INTO public.collection_logs (client_record_id, site_id, material_code, reported_weight_kg,
+                                             device_latitude, device_longitude, device_accuracy_m)
+         VALUES (gen_random_uuid(), %L, ''PET'', 1, %s)', t.site(1), bad);
+      RAISE EXCEPTION 'device location (%) accepted', bad;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  END LOOP;
+
+  -- immutable after submission, even for the owner and service_role
+  PERFORM t.become('postgres');
+  FOREACH bad IN ARRAY ARRAY['device_latitude = 0', 'device_longitude = 0', 'device_accuracy_m = 1',
+                             'device_latitude = NULL, device_longitude = NULL, device_accuracy_m = NULL',
+                             'material_code = ''HDPE''', 'captured_at = now()', 'site_id = ' || quote_literal(t.site(2))] LOOP
+    BEGIN
+      EXECUTE format('UPDATE public.collection_logs SET %s WHERE id = %L', bad, r.id);
+      RAISE EXCEPTION 'owner changed submitted field: %', bad;
+    EXCEPTION WHEN raise_exception THEN
+      ASSERT SQLERRM = 'Submitted collection details cannot be changed', bad || ': ' || SQLERRM;
+    END;
+  END LOOP;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    UPDATE public.collection_logs SET device_latitude = 0 WHERE id = r.id;
+    RAISE EXCEPTION 'collector updated location';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  PERFORM t.become('postgres');
+  SELECT count(*) INTO n FROM public.collection_logs
+  WHERE id = r.id AND device_latitude = -1.2921 AND material_code = 'PET';
+  ASSERT n = 1;
+  PERFORM t.pass('device location: ranges, lat/lng pairing, finite accuracy >= 0 with coordinates; stored and audited; immutable like other submitted fields');
+END $$;
+
+-- 35: verified lines follow the parent collection's visibility; recyclers denied
+DO $$
+DECLARE n BIGINT; u TEXT;
+BEGIN
+  -- col_a: c1's approved collection at site 1, 2 lines
+  FOREACH u IN ARRAY ARRAY['c1', 'm1', 'admin'] LOOP
+    PERFORM t.as_user(t.id(u));
+    SELECT count(*) INTO n FROM public.collection_verified_items WHERE collection_id = t.id('col_a');
+    ASSERT n = 2, u || ' sees ' || n || ' lines of col_a';
+  END LOOP;
+  -- r1 can still read the approved collection row itself (S1b removes that),
+  -- but never its breakdown lines
+  PERFORM t.as_user(t.id('r1'));
+  ASSERT EXISTS (SELECT 1 FROM public.collection_logs WHERE id = t.id('col_a'));
+  SELECT count(*) INTO n FROM public.collection_verified_items;
+  ASSERT n = 0, 'recycler r1 sees ' || n || ' lines';
+  FOREACH u IN ARRAY ARRAY['c2', 'm2', 'r2', 'm_off'] LOOP
+    PERFORM t.as_user(t.id(u));
+    SELECT count(*) INTO n FROM public.collection_verified_items WHERE collection_id = t.id('col_a');
+    ASSERT n = 0, u || ' sees ' || n || ' lines of col_a';
+  END LOOP;
+  -- c1 sees only its own collections' lines; m1 only site 1
+  PERFORM t.as_user(t.id('c1'));
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_verified_items vi
+                     JOIN public.collection_logs c ON c.id = vi.collection_id
+                     WHERE c.collector_id <> t.id('c1'));
+  PERFORM t.as_user(t.id('admin'));
+  SELECT count(*) INTO n FROM public.collection_verified_items;
+  PERFORM t.become('postgres');
+  ASSERT n = (SELECT count(*) FROM public.collection_verified_items), 'admin sees all lines';
+  BEGIN
+    PERFORM t.become('anon');
+    PERFORM 1 FROM public.collection_verified_items;
+    RAISE EXCEPTION 'anon read verified lines';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  PERFORM t.pass('verified lines visible to the owning collector, site managers and admins only; recyclers, other sites, inactive users and anon see none');
 END $$;

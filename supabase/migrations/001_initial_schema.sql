@@ -9,18 +9,47 @@ CREATE TYPE public.user_role AS ENUM (
   'admin'
 );
 
-CREATE TYPE public.material_type AS ENUM (
-  'PET',
-  'HDPE',
-  'LDPE',
-  'MIXED'
-);
-
 CREATE TYPE public.collection_status AS ENUM (
   'pending',
   'approved',
   'rejected'
 );
+
+-- MATERIALS (lookup table, so types can be added without a schema change)
+--   is_reportable       collectors may report it for a whole delivery
+--   is_verifiable       site managers may use it in a verified breakdown
+--   is_recycler_visible shown in recycler totals (only verified lines are
+--                       counted, so it requires is_verifiable)
+-- Clients can read it; nobody but the owner can change it.
+CREATE TABLE public.materials (
+  code TEXT PRIMARY KEY
+    CONSTRAINT materials_code_format CHECK (code ~ '^[A-Z][A-Z0-9_]{0,31}$'),
+  display_name TEXT NOT NULL
+    CONSTRAINT materials_display_name_length
+      CHECK (length(trim(display_name)) BETWEEN 1 AND 60),
+  is_reportable BOOLEAN NOT NULL DEFAULT false,
+  is_verifiable BOOLEAN NOT NULL DEFAULT false,
+  is_recycler_visible BOOLEAN NOT NULL DEFAULT false,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  CONSTRAINT materials_recycler_visible_requires_verifiable
+    CHECK (NOT is_recycler_visible OR is_verifiable)
+);
+
+REVOKE ALL ON public.materials FROM PUBLIC, anon, authenticated, service_role;
+
+-- Reference data (not test data): reaches every environment with this
+-- migration. MIXED may be reported but never verified or shown to recyclers.
+-- No OTHER/residue type until Chemolex confirms it is needed.
+INSERT INTO public.materials
+  (code, display_name, is_reportable, is_verifiable, is_recycler_visible, sort_order)
+VALUES
+  ('PET',          'PET',          true, true,  true,  10),
+  ('PP',           'PP',           true, true,  true,  20),
+  ('HDPE',         'HDPE',         true, true,  true,  30),
+  ('LDPE',         'LDPE',         true, true,  true,  40),
+  ('PLASTIC_BAGS', 'Plastic bags', true, true,  true,  50),
+  ('MIXED',        'Mixed',        true, false, false, 60);
 
 -- SITES
 CREATE TABLE public.sites (
@@ -78,9 +107,10 @@ REVOKE ALL ON public.user_sites FROM PUBLIC, anon, authenticated, service_role;
 CREATE INDEX user_sites_site_id_idx ON public.user_sites(site_id);
 
 -- COLLECTION RECORDS
--- Collectors may only supply: client_record_id, site_id, material,
--- reported_weight_kg and captured_at (see column grants below).
--- Everything else is set by defaults, triggers or review_collection().
+-- Collectors may only supply: client_record_id, site_id, material_code,
+-- reported_weight_kg, captured_at and the device location fields (see
+-- column grants below). Everything else is set by defaults, triggers or
+-- review_collection().
 CREATE TABLE public.collection_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   -- Client-generated offline idempotency key.
@@ -88,11 +118,14 @@ CREATE TABLE public.collection_logs (
   collector_id UUID NOT NULL DEFAULT auth.uid()
     REFERENCES public.profiles(id),
   site_id UUID NOT NULL REFERENCES public.sites(id),
-  material public.material_type NOT NULL,
+  -- Collector-reported material for the whole delivery (may be MIXED).
+  -- Must be active and reportable (enforce_collection_insert).
+  material_code TEXT NOT NULL REFERENCES public.materials(code),
   -- Collector-reported weight. Never used for payout.
   reported_weight_kg NUMERIC(10,2) NOT NULL
     CHECK (reported_weight_kg > 0),
-  -- Site-manager-verified weight. Set only by review_collection().
+  -- Site-manager-verified total: the sum of this collection's
+  -- collection_verified_items lines. Set only by review_collection().
   verified_weight_kg NUMERIC(10,2)
     CHECK (verified_weight_kg IS NULL OR verified_weight_kg > 0),
   status public.collection_status NOT NULL DEFAULT 'pending',
@@ -100,6 +133,24 @@ CREATE TABLE public.collection_logs (
   -- Device-reported capture time (untrusted; useful for offline records).
   -- submitted_at and created_at are server-set trusted timestamps.
   captured_at TIMESTAMPTZ,
+  -- Device location at capture (untrusted device-provided evidence, NOT a
+  -- verified site location). Optional: NULL when permission is denied.
+  device_latitude DOUBLE PRECISION
+    CONSTRAINT collection_device_latitude_range
+      CHECK (device_latitude IS NULL OR device_latitude BETWEEN -90 AND 90),
+  device_longitude DOUBLE PRECISION
+    CONSTRAINT collection_device_longitude_range
+      CHECK (device_longitude IS NULL OR device_longitude BETWEEN -180 AND 180),
+  -- Reported accuracy radius in metres. Finite and >= 0 (rejects NaN and
+  -- Infinity), and only meaningful together with coordinates.
+  device_accuracy_m DOUBLE PRECISION
+    CONSTRAINT collection_device_accuracy_range
+      CHECK (device_accuracy_m IS NULL
+             OR (device_accuracy_m >= 0 AND device_accuracy_m < 'Infinity'::DOUBLE PRECISION)),
+  CONSTRAINT collection_device_coordinates_pair
+    CHECK ((device_latitude IS NULL) = (device_longitude IS NULL)),
+  CONSTRAINT collection_device_accuracy_needs_coordinates
+    CHECK (device_accuracy_m IS NULL OR device_latitude IS NOT NULL),
   submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   verified_by UUID REFERENCES public.profiles(id),
   verified_at TIMESTAMPTZ,
@@ -149,6 +200,7 @@ CREATE INDEX collection_logs_submitted_at_idx
   ON public.collection_logs(submitted_at DESC);
 
 -- PHOTO EVIDENCE
+-- Device location lives on collection_logs (one per delivery), not here.
 CREATE TABLE public.collection_evidence (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   collection_id UUID NOT NULL
@@ -156,17 +208,31 @@ CREATE TABLE public.collection_evidence (
   storage_path TEXT NOT NULL UNIQUE,
   content_type TEXT NOT NULL,
   captured_at TIMESTAMPTZ,
-  latitude DOUBLE PRECISION,
-  longitude DOUBLE PRECISION,
-  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90),
-  CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180)
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 REVOKE ALL ON public.collection_evidence FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE INDEX collection_evidence_collection_idx
   ON public.collection_evidence(collection_id);
+
+-- VERIFIED BREAKDOWN
+-- One line per verified material per collection, recorded by the site
+-- manager after sorting and weighing. Written only by review_collection()
+-- (no client write grants); lines are never updated (see trigger below).
+-- The collector's reported material and weight on collection_logs are
+-- separate and unchanged.
+CREATE TABLE public.collection_verified_items (
+  collection_id UUID NOT NULL
+    REFERENCES public.collection_logs(id) ON DELETE CASCADE,
+  material_code TEXT NOT NULL REFERENCES public.materials(code),
+  weight_kg NUMERIC(10,2) NOT NULL
+    CONSTRAINT collection_verified_items_weight_positive CHECK (weight_kg > 0),
+  CONSTRAINT collection_verified_items_pkey
+    PRIMARY KEY (collection_id, material_code)
+);
+
+REVOKE ALL ON public.collection_verified_items FROM PUBLIC, anon, authenticated, service_role;
 
 -- AUDIT HISTORY
 CREATE TABLE public.collection_events (
@@ -187,13 +253,26 @@ CREATE INDEX collection_events_collection_idx
 
 -- COLLECTION INTEGRITY TRIGGERS
 -- Force workflow fields and trusted timestamps on every insert,
--- whatever the caller supplied.
+-- whatever the caller supplied, and only accept an active, reportable
+-- material. (A NULL material is left to the NOT NULL constraint.)
 CREATE OR REPLACE FUNCTION public.enforce_collection_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SET search_path = ''
 AS $$
 BEGIN
+  IF NEW.material_code IS NOT NULL AND NOT EXISTS (
+    SELECT 1
+    FROM public.materials AS m
+    WHERE m.code = NEW.material_code
+      AND m.is_active
+      AND m.is_reportable
+  ) THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'check_violation',
+      MESSAGE = format('Material %s cannot be reported', NEW.material_code);
+  END IF;
+
   NEW.status := 'pending'::public.collection_status;
   NEW.verified_weight_kg := NULL;
   NEW.verified_by := NULL;
@@ -227,9 +306,12 @@ BEGIN
     OR NEW.client_record_id IS DISTINCT FROM OLD.client_record_id
     OR NEW.collector_id IS DISTINCT FROM OLD.collector_id
     OR NEW.site_id IS DISTINCT FROM OLD.site_id
-    OR NEW.material IS DISTINCT FROM OLD.material
+    OR NEW.material_code IS DISTINCT FROM OLD.material_code
     OR NEW.reported_weight_kg IS DISTINCT FROM OLD.reported_weight_kg
     OR NEW.captured_at IS DISTINCT FROM OLD.captured_at
+    OR NEW.device_latitude IS DISTINCT FROM OLD.device_latitude
+    OR NEW.device_longitude IS DISTINCT FROM OLD.device_longitude
+    OR NEW.device_accuracy_m IS DISTINCT FROM OLD.device_accuracy_m
     OR NEW.submitted_at IS DISTINCT FROM OLD.submitted_at
     OR NEW.created_at IS DISTINCT FROM OLD.created_at
   THEN
@@ -276,9 +358,12 @@ BEGIN
       'new_status', NEW.status,
       'client_record_id', NEW.client_record_id,
       'site_id', NEW.site_id,
-      'material', NEW.material,
+      'material_code', NEW.material_code,
       'reported_weight_kg', NEW.reported_weight_kg,
-      'captured_at', NEW.captured_at
+      'captured_at', NEW.captured_at,
+      'device_latitude', NEW.device_latitude,
+      'device_longitude', NEW.device_longitude,
+      'device_accuracy_m', NEW.device_accuracy_m
     )
   );
 
@@ -294,6 +379,54 @@ CREATE TRIGGER collection_logs_record_submitted
   AFTER INSERT ON public.collection_logs
   FOR EACH ROW
   EXECUTE FUNCTION public.record_collection_submitted();
+
+-- Verified breakdown lines are never changed once written, and can only be
+-- added to a collection that is still pending (review_collection() inserts
+-- them before it changes the status) with an active, verifiable material.
+-- This applies to every role, including the owner; clients have no write
+-- privileges at all.
+CREATE OR REPLACE FUNCTION public.protect_collection_verified_item()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'Verified breakdown lines cannot be changed';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.collection_logs AS c
+    WHERE c.id = NEW.collection_id
+      AND c.status = 'pending'::public.collection_status
+  ) THEN
+    RAISE EXCEPTION 'Verified breakdown lines can only be added to a pending collection';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.materials AS m
+    WHERE m.code = NEW.material_code
+      AND m.is_active
+      AND m.is_verifiable
+  ) THEN
+    RAISE EXCEPTION 'Material % cannot be used in a verified breakdown',
+      NEW.material_code;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger function: no EXECUTE for anyone (not checked when a trigger fires).
+REVOKE ALL ON FUNCTION public.protect_collection_verified_item()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER collection_verified_items_protect
+  BEFORE INSERT OR UPDATE ON public.collection_verified_items
+  FOR EACH ROW
+  EXECUTE FUNCTION public.protect_collection_verified_item();
 
 -- SECURITY HELPERS
 CREATE OR REPLACE FUNCTION public.is_active_admin()
@@ -365,10 +498,19 @@ GRANT EXECUTE ON FUNCTION public.can_review_site(UUID)
   TO authenticated;
 
 -- SERVER-SIDE COLLECTION REVIEW
+-- p_verified_items: JSON array of {"material_code": text, "weight_kg": number}.
+--   Approval: at least one line; each line has exactly those two keys; the
+--   material exists, is active and verifiable, and appears once; the weight
+--   is a JSON number > 0 with at most 2 decimal places (never rounded).
+--   At least one evidence row must exist. verified_weight_kg is computed
+--   here as the sum of the stored lines; no client total is accepted.
+--   Rejection: no lines (NULL or []) and a non-blank reason.
+-- Everything runs in the caller's single transaction: any error rolls back
+-- the status change, the lines and the audit event together.
 CREATE OR REPLACE FUNCTION public.review_collection(
   p_collection_id UUID,
   p_approved BOOLEAN,
-  p_verified_weight_kg NUMERIC DEFAULT NULL,
+  p_verified_items JSONB DEFAULT NULL,
   p_rejection_reason TEXT DEFAULT NULL
 )
 RETURNS VOID
@@ -381,6 +523,12 @@ DECLARE
   v_new_status public.collection_status;
   v_verified_weight_kg NUMERIC;
   v_rejection_reason TEXT;
+  v_item JSONB;
+  v_code TEXT;
+  v_weight NUMERIC;
+  v_seen TEXT[] := '{}';
+  v_material public.materials%ROWTYPE;
+  v_items_detail JSONB;
 BEGIN
   SELECT *
   INTO v_collection
@@ -400,27 +548,129 @@ BEGIN
     RAISE EXCEPTION 'Only pending collections can be reviewed';
   END IF;
 
-  IF p_approved AND (
-    p_verified_weight_kg IS NULL OR p_verified_weight_kg <= 0
-  ) THEN
-    RAISE EXCEPTION 'A valid verified weight is required for approval';
-  END IF;
-
-  IF NOT p_approved AND (
-    p_rejection_reason IS NULL OR length(trim(p_rejection_reason)) = 0
-  ) THEN
-    RAISE EXCEPTION 'A rejection reason is required';
+  IF p_approved IS NULL THEN
+    RAISE EXCEPTION 'An approval decision is required';
   END IF;
 
   IF p_approved THEN
+    IF p_verified_items IS NULL
+      OR jsonb_typeof(p_verified_items) <> 'array'
+    THEN
+      RAISE EXCEPTION 'The verified breakdown must be a JSON array of lines';
+    END IF;
+
+    IF jsonb_array_length(p_verified_items) = 0 THEN
+      RAISE EXCEPTION 'At least one verified breakdown line is required for approval';
+    END IF;
+
+    FOR v_item IN
+      SELECT e.value FROM jsonb_array_elements(p_verified_items) AS e(value)
+    LOOP
+      IF jsonb_typeof(v_item) <> 'object'
+        OR NOT (v_item ? 'material_code' AND v_item ? 'weight_kg')
+        OR EXISTS (
+          SELECT 1 FROM jsonb_object_keys(v_item) AS k(key)
+          WHERE k.key NOT IN ('material_code', 'weight_kg')
+        )
+      THEN
+        RAISE EXCEPTION 'Each verified breakdown line must have exactly material_code and weight_kg';
+      END IF;
+
+      IF jsonb_typeof(v_item -> 'material_code') <> 'string' THEN
+        RAISE EXCEPTION 'material_code must be a string';
+      END IF;
+      v_code := v_item ->> 'material_code';
+
+      IF jsonb_typeof(v_item -> 'weight_kg') <> 'number' THEN
+        RAISE EXCEPTION 'weight_kg for % must be a number', v_code;
+      END IF;
+      v_weight := (v_item ->> 'weight_kg')::NUMERIC;
+
+      IF v_weight <= 0 THEN
+        RAISE EXCEPTION 'weight_kg for % must be greater than zero', v_code;
+      END IF;
+
+      IF v_weight <> round(v_weight, 2) THEN
+        RAISE EXCEPTION 'weight_kg for % must have at most 2 decimal places', v_code;
+      END IF;
+
+      IF v_weight > 99999999.99 THEN
+        RAISE EXCEPTION 'weight_kg for % is too large', v_code;
+      END IF;
+
+      IF v_code = ANY (v_seen) THEN
+        RAISE EXCEPTION 'Material % appears more than once in the verified breakdown', v_code;
+      END IF;
+      v_seen := v_seen || v_code;
+
+      SELECT * INTO v_material FROM public.materials AS m WHERE m.code = v_code;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Unknown material code %', v_code;
+      END IF;
+      IF NOT (v_material.is_active AND v_material.is_verifiable) THEN
+        RAISE EXCEPTION 'Material % cannot be used in a verified breakdown', v_code;
+      END IF;
+    END LOOP;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM public.collection_evidence AS ev
+      WHERE ev.collection_id = p_collection_id
+    ) THEN
+      RAISE EXCEPTION 'At least one photo evidence record is required for approval';
+    END IF;
+
     v_new_status := 'approved'::public.collection_status;
-    v_verified_weight_kg := p_verified_weight_kg;
     v_rejection_reason := NULL;
   ELSE
+    IF p_verified_items IS NOT NULL AND p_verified_items <> '[]'::JSONB THEN
+      RAISE EXCEPTION 'A rejected collection cannot have a verified breakdown';
+    END IF;
+
+    IF p_rejection_reason IS NULL OR length(trim(p_rejection_reason)) = 0 THEN
+      RAISE EXCEPTION 'A rejection reason is required';
+    END IF;
+
     v_new_status := 'rejected'::public.collection_status;
-    v_verified_weight_kg := NULL;
     v_rejection_reason := trim(p_rejection_reason);
   END IF;
+
+  -- Lines first (the protect trigger requires a pending collection), then
+  -- the total from what was actually stored.
+  IF p_approved THEN
+    INSERT INTO public.collection_verified_items (
+      collection_id,
+      material_code,
+      weight_kg
+    )
+    SELECT
+      p_collection_id,
+      e.value ->> 'material_code',
+      (e.value ->> 'weight_kg')::NUMERIC
+    FROM jsonb_array_elements(p_verified_items) AS e(value);
+
+    SELECT sum(vi.weight_kg)
+    INTO v_verified_weight_kg
+    FROM public.collection_verified_items AS vi
+    WHERE vi.collection_id = p_collection_id;
+
+    IF v_verified_weight_kg > 99999999.99 THEN
+      RAISE EXCEPTION 'The verified total is too large';
+    END IF;
+  ELSE
+    v_verified_weight_kg := NULL;
+  END IF;
+
+  SELECT COALESCE(
+    jsonb_agg(
+      jsonb_build_object('material_code', vi.material_code, 'weight_kg', vi.weight_kg)
+      ORDER BY m.sort_order, vi.material_code
+    ),
+    '[]'::JSONB
+  )
+  INTO v_items_detail
+  FROM public.collection_verified_items AS vi
+  JOIN public.materials AS m ON m.code = vi.material_code
+  WHERE vi.collection_id = p_collection_id;
 
   UPDATE public.collection_logs
   SET
@@ -445,7 +695,9 @@ BEGIN
     jsonb_build_object(
       'previous_status', v_collection.status,
       'new_status', v_new_status,
+      'reported_material_code', v_collection.material_code,
       'reported_weight_kg', v_collection.reported_weight_kg,
+      'verified_items', v_items_detail,
       'verified_weight_kg', v_verified_weight_kg,
       'rejection_reason', v_rejection_reason,
       'payment_eligible', p_approved
@@ -454,9 +706,11 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.review_collection(UUID, BOOLEAN, NUMERIC, TEXT)
+-- Only this signature exists; no other review_collection overload is
+-- created anywhere.
+REVOKE ALL ON FUNCTION public.review_collection(UUID, BOOLEAN, JSONB, TEXT)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.review_collection(UUID, BOOLEAN, NUMERIC, TEXT)
+GRANT EXECUTE ON FUNCTION public.review_collection(UUID, BOOLEAN, JSONB, TEXT)
   TO authenticated;
 
 -- ROW LEVEL SECURITY
@@ -467,6 +721,15 @@ ALTER TABLE public.user_sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collection_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collection_evidence ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collection_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.materials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.collection_verified_items ENABLE ROW LEVEL SECURITY;
+
+-- MATERIALS
+-- Reference data: every signed-in user may read every row (inactive rows
+-- are still needed to label historical records). No write policies.
+CREATE POLICY materials_read_authenticated
+  ON public.materials FOR SELECT TO authenticated
+  USING (true);
 
 -- PROFILES
 CREATE POLICY profiles_read_self_or_admin
@@ -578,6 +841,24 @@ CREATE POLICY collectors_add_evidence
     )
   );
 
+-- VERIFIED BREAKDOWN
+-- Readable by the owning collector, managers who can review the site and
+-- active admins (can_review_site includes them). Recyclers have no access:
+-- they will only see aggregate totals. No write policies.
+CREATE POLICY verified_items_read_permitted
+  ON public.collection_verified_items FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.collection_logs c
+      WHERE c.id = collection_id
+        AND (
+          c.collector_id = (SELECT auth.uid())
+          OR public.can_review_site(c.site_id)
+        )
+    )
+  );
+
 -- EVENTS
 CREATE POLICY events_read_permitted
   ON public.collection_events FOR SELECT TO authenticated
@@ -602,7 +883,9 @@ GRANT SELECT ON
   public.user_sites,
   public.collection_logs,
   public.collection_evidence,
-  public.collection_events
+  public.collection_events,
+  public.materials,
+  public.collection_verified_items
 TO authenticated;
 
 -- Collectors may only supply these columns. id, collector_id, status,
@@ -610,9 +893,12 @@ TO authenticated;
 GRANT INSERT (
   client_record_id,
   site_id,
-  material,
+  material_code,
   reported_weight_kg,
-  captured_at
+  captured_at,
+  device_latitude,
+  device_longitude,
+  device_accuracy_m
 ) ON public.collection_logs TO authenticated;
 GRANT INSERT ON public.collection_evidence TO authenticated;
 
@@ -622,8 +908,9 @@ GRANT INSERT ON public.collection_evidence TO authenticated;
 --                profile state before reissue/accept.
 --   sites      - validate requested site ids and name sites in emails.
 --   user_sites - read an invitee's current assignments for reissue/accept.
--- Nothing on sme_groups, collection_logs, collection_evidence or
--- collection_events: no Edge Function needs them.
+-- Nothing on sme_groups, collection_logs, collection_evidence,
+-- collection_events, materials or collection_verified_items: no Edge
+-- Function needs them.
 GRANT SELECT ON
   public.profiles,
   public.sites,
