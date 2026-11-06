@@ -135,8 +135,8 @@ BEGIN
     ARRAY[t.site(1)], t.id('admin'), t.h('k5'));
   PERFORM t.confirm(v_x);
   COMMIT;
-  ASSERT public.consume_invitation(v_inv) = v_inv;
-  PERFORM t.peer_send('svc', format('SELECT public.consume_invitation(%L)::text', v_inv));
+  ASSERT t.consume(v_inv) = v_inv;
+  PERFORM t.peer_send('svc', format('SELECT t.consume(%L)::text', v_inv));
   PERFORM t.peer_wait_blocked('svc');
   COMMIT;
   r := t.peer_result('svc');
@@ -157,7 +157,7 @@ BEGIN
     ARRAY[t.site(1)], t.id('admin'), t.h('k6'));
   PERFORM t.confirm(v_x);
   COMMIT;
-  ASSERT public.consume_invitation(v_inv) = v_inv;
+  ASSERT t.consume(v_inv) = v_inv;
   PERFORM t.peer_send('adm', format('SELECT public.revoke_invitation(%L)::text', v_inv));
   PERFORM t.peer_wait_blocked('adm');
   COMMIT;
@@ -178,7 +178,7 @@ BEGIN
   PERFORM t.confirm(v_x);
   COMMIT;
   ASSERT t.revoke_as(v_inv, t.id('admin')) = v_inv;
-  PERFORM t.peer_send('svc', format('SELECT public.consume_invitation(%L)::text', v_inv));
+  PERFORM t.peer_send('svc', format('SELECT t.consume(%L)::text', v_inv));
   PERFORM t.peer_wait_blocked('svc');
   COMMIT;
   r := t.peer_result('svc');
@@ -209,6 +209,130 @@ BEGIN
   ASSERT (t.inv(v_inv)).status = 'superseded' AND (t.inv(v_inv)).revoked_by = t.id('admin');
   ASSERT t.pending_count(v_x) = 1;
   PERFORM t.pass('revoke then concurrent reissue: the reissue waits, then sees the revoked row and succeeds');
+END $$;
+
+-- ============================================================ activation claim
+-- 9: two concurrent claims. The first holds the row lock; the second waits,
+-- then sees the live claim and gets NULL. Only the first may set the
+-- password.
+DO $$
+DECLARE v_x UUID; v_inv UUID; v_tok UUID; r TEXT; v_sql TEXT;
+BEGIN
+  v_x := t.mkuser('k9', 'k9@example.test');
+  v_inv := public.register_invitation(v_x, 'k9@example.test', 'K Nine', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('k9'));
+  PERFORM t.confirm(v_x);
+  COMMIT;
+  v_sql := format('SELECT public.claim_invitation(%L)::text', v_inv);
+
+  v_tok := public.claim_invitation(v_inv);
+  ASSERT v_tok IS NOT NULL;
+
+  r := t.peer_try('svc', v_sql, '200ms');
+  ASSERT r LIKE 'ERROR:55P03:%', 'expected lock timeout, got ' || r;
+
+  PERFORM t.peer_send('svc', v_sql);
+  PERFORM t.peer_wait_blocked('svc');
+  COMMIT;
+  r := t.peer_result('svc');
+  ASSERT r = 'OK:<null>', 'second claim got ' || r;
+  ASSERT t.claim_token(v_inv) = v_tok, 'loser replaced the claim';
+
+  -- the loser cannot consume; the winner can
+  r := t.peer_try('svc', format('SELECT public.consume_invitation(%L, NULL)::text', v_inv), '5s');
+  ASSERT r = 'ERROR:P0001:Invitation claim is not held', 'loser consume got ' || r;
+  ASSERT public.consume_invitation(v_inv, v_tok) = v_inv;
+  ASSERT t.status(v_inv) = 'accepted' AND (t.profile(v_x)).is_active;
+  PERFORM t.pass('concurrent claims: the second waits on the row lock, then gets NULL; only the winner consumes');
+END $$;
+
+-- 10: the first claim rolls back, so the waiting claim wins.
+DO $$
+DECLARE v_x UUID; v_inv UUID; r TEXT;
+BEGIN
+  v_x := t.mkuser('k10', 'k10@example.test');
+  v_inv := public.register_invitation(v_x, 'k10@example.test', 'K Ten', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('k10'));
+  PERFORM t.confirm(v_x);
+  COMMIT;
+  ASSERT public.claim_invitation(v_inv) IS NOT NULL;
+  PERFORM t.peer_send('svc', format('SELECT public.claim_invitation(%L)::text', v_inv));
+  PERFORM t.peer_wait_blocked('svc');
+  ROLLBACK;
+  r := t.peer_result('svc');
+  ASSERT r LIKE 'OK:%' AND r <> 'OK:<null>', 'peer should win after rollback, got ' || r;
+  ASSERT t.claim_token(v_inv) = substr(r, 4)::uuid;
+  PERFORM t.pass('concurrent claims: when the first claimant rolls back, the waiting claim wins');
+END $$;
+
+-- 11: consume holds the row; a concurrent claim waits and then gets NULL.
+DO $$
+DECLARE v_x UUID; v_inv UUID; r TEXT;
+BEGIN
+  v_x := t.mkuser('k11', 'k11@example.test');
+  v_inv := public.register_invitation(v_x, 'k11@example.test', 'K Eleven', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('k11'));
+  PERFORM t.confirm(v_x);
+  COMMIT;
+  ASSERT t.consume(v_inv) = v_inv;
+  PERFORM t.peer_send('svc', format('SELECT public.claim_invitation(%L)::text', v_inv));
+  PERFORM t.peer_wait_blocked('svc');
+  COMMIT;
+  r := t.peer_result('svc');
+  ASSERT r = 'OK:<null>', 'claim after accept got ' || r;
+  ASSERT t.status(v_inv) = 'accepted' AND t.claim_token(v_inv) IS NULL;
+  PERFORM t.pass('consume vs claim: the waiting claim sees the accepted row and gets NULL');
+END $$;
+
+-- 12: an abandoned (expired) claim is taken over by another request; the
+-- original holder can then neither consume nor release.
+DO $$
+DECLARE v_x UUID; v_inv UUID; v_old UUID; r TEXT;
+BEGIN
+  v_x := t.mkuser('k12', 'k12@example.test');
+  v_inv := public.register_invitation(v_x, 'k12@example.test', 'K Twelve', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('k12'));
+  PERFORM t.confirm(v_x);
+  v_old := public.claim_invitation(v_inv);
+  PERFORM t.expire_claim(v_inv);
+  COMMIT;
+  r := t.peer_try('svc', format('SELECT public.claim_invitation(%L)::text', v_inv), '5s');
+  ASSERT r LIKE 'OK:%' AND r <> 'OK:<null>', 'takeover claim got ' || r;
+  ASSERT NOT public.release_invitation_claim(v_inv, v_old);
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_old);
+    RAISE EXCEPTION 'stale holder consumed';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation claim is not held', SQLERRM; END;
+  COMMIT;
+  r := t.peer_try('svc', format('SELECT public.consume_invitation(%L, %L)::text',
+    v_inv, substr(r, 4)::uuid), '5s');
+  ASSERT r = 'OK:' || v_inv, 'new holder consume got ' || r;
+  PERFORM t.pass('expired claim: another request takes it over; the stale holder can neither release nor consume');
+END $$;
+
+-- 13: a claim is in progress; an admin revoke waits, then succeeds and
+-- clears the claim, so the claimant's consume fails.
+DO $$
+DECLARE v_x UUID; v_inv UUID; v_tok UUID; r TEXT;
+BEGIN
+  v_x := t.mkuser('k13', 'k13@example.test');
+  v_inv := public.register_invitation(v_x, 'k13@example.test', 'K Thirteen', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('k13'));
+  PERFORM t.confirm(v_x);
+  COMMIT;
+  v_tok := public.claim_invitation(v_inv);
+  PERFORM t.peer_send('adm', format('SELECT public.revoke_invitation(%L)::text', v_inv));
+  PERFORM t.peer_wait_blocked('adm');
+  COMMIT;
+  r := t.peer_result('adm');
+  ASSERT r = 'OK:' || v_inv, 'revoke got ' || r;
+  ASSERT t.status(v_inv) = 'revoked' AND t.claim_token(v_inv) IS NULL;
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_tok);
+    RAISE EXCEPTION 'consumed after revoke';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
+  ASSERT NOT (t.profile(v_x)).is_active;
+  PERFORM t.pass('claim vs revoke: the revoke waits, then clears the claim; the claimant cannot consume');
 END $$;
 
 DO $$ BEGIN

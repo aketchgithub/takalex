@@ -9,8 +9,8 @@
 // It is never logged or stored: the database only receives the lowercase hex
 // SHA-256 of the normalised code (uppercase, separators removed).
 
-// @ts-ignore Deno resolves this remote module at runtime.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "../_shared/supabase.ts";
+import { hashCode } from "../_shared/invitationCode.ts";
 
 declare const Deno: {
   env: { get(name: string): string | undefined };
@@ -186,21 +186,6 @@ function generateCode(): string {
   }
   const raw = chars.join("");
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
-}
-
-// Must match the normalisation used when the invitee enters the code.
-function normaliseCode(code: string): string {
-  return code.toUpperCase().replace(/[\s-]/g, "");
-}
-
-async function hashCode(code: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(normaliseCode(code)),
-  );
-  return Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
 }
 
 // Admin-facing messages for the exceptions raised by register_invitation and

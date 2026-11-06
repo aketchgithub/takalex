@@ -154,7 +154,7 @@ DO $$ BEGIN
   ASSERT NOT (t.v('alice@example.test', '111111')->>'is_valid')::bool, 'locked must fail';
   PERFORM t.confirm(t.id('a'));
   BEGIN
-    PERFORM public.consume_invitation(t.id('inv_a'));
+    PERFORM t.consume(t.id('inv_a'));
     RAISE EXCEPTION 'consumed a locked invitation';
   EXCEPTION WHEN raise_exception THEN
     ASSERT SQLERRM = 'Invitation is not valid', SQLERRM;
@@ -178,7 +178,7 @@ SELECT t.as_owner(format('UPDATE public.invitations SET expires_at = now() WHERE
 DO $$ BEGIN
   ASSERT NOT (t.v('erin@example.test', '222222')->>'is_valid')::bool, 'expires_at = now() must be expired';
   BEGIN
-    PERFORM public.consume_invitation(t.id('inv_e'));
+    PERFORM t.consume(t.id('inv_e'));
     RAISE EXCEPTION 'consumed at expires_at = now()';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
   PERFORM t.pass('expires_at = now() already counts as expired (verify and consume)');
@@ -190,7 +190,7 @@ SELECT t.expire(t.id('inv_e'));
 DO $$ BEGIN
   ASSERT NOT (t.v('erin@example.test', '222222')->>'is_valid')::bool;
   BEGIN
-    PERFORM public.consume_invitation(t.id('inv_e'));
+    PERFORM t.consume(t.id('inv_e'));
     RAISE EXCEPTION 'consumed expired';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
   ASSERT t.status(t.id('inv_e')) = 'pending', 'status unchanged';
@@ -238,18 +238,18 @@ BEGIN
   PERFORM t.confirm(v_u);
   j := t.v('carol@example.test', '444444');
   ASSERT (j->>'is_valid')::bool;
-  ASSERT public.consume_invitation((j->>'invitation_id')::uuid) = v_inv;
+  ASSERT t.consume((j->>'invitation_id')::uuid) = v_inv;
   r := t.inv(v_inv);
   ASSERT r.status = 'accepted' AND r.accepted_at IS NOT NULL;
   ASSERT (SELECT p.is_active AND p.role = 'site_manager' FROM t.profile(v_u) AS p);
   BEGIN
-    PERFORM public.consume_invitation(v_inv);
+    PERFORM t.consume(v_inv);
     RAISE EXCEPTION 'consumed twice';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
   ASSERT (t.inv(v_inv)).accepted_at = r.accepted_at;
   ASSERT NOT (t.v('carol@example.test', '444444')->>'is_valid')::bool, 'verify after accept';
   BEGIN
-    PERFORM public.consume_invitation(gen_random_uuid());
+    PERFORM t.consume(gen_random_uuid());
     RAISE EXCEPTION 'consumed unknown id';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
   PERFORM t.pass('consume (confirmed account, email differs only in case) activates exactly once');
@@ -265,7 +265,7 @@ BEGIN
   PERFORM t.confirm(v_u);
   PERFORM t.as_owner(format('DELETE FROM public.user_sites WHERE user_id = %L', v_u));
   BEGIN
-    PERFORM public.consume_invitation(v_inv);
+    PERFORM t.consume(v_inv);
     RAISE EXCEPTION 'consumed without sites';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'No site assignment%', SQLERRM; END;
   ASSERT t.status(v_inv) = 'pending' AND NOT (t.profile(v_u)).is_active;
@@ -273,12 +273,12 @@ BEGIN
   PERFORM t.assign(v_u, t.site(5));
   PERFORM t.set_profile(v_u, 'recycler', false);
   BEGIN
-    PERFORM public.consume_invitation(v_inv);
+    PERFORM t.consume(v_inv);
     RAISE EXCEPTION 'consumed with role mismatch';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'The invited profile%', SQLERRM; END;
   PERFORM t.set_profile(v_u, 'collector', true);
   BEGIN
-    PERFORM public.consume_invitation(v_inv);
+    PERFORM t.consume(v_inv);
     RAISE EXCEPTION 'consumed with active profile';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'The invited profile%', SQLERRM; END;
   ASSERT t.status(v_inv) = 'pending';
@@ -309,7 +309,7 @@ BEGIN
     ASSERT (t.v(k || '@example.test', 'auth-' || k)->>'is_valid')::bool, k || ' verifies';
     PERFORM t.as_owner(format(v_cases[i][2], v_u));
     BEGIN
-      PERFORM public.consume_invitation(v_inv);
+      PERFORM t.consume(v_inv);
       RAISE EXCEPTION 'consumed with % account', k;
     EXCEPTION WHEN raise_exception THEN
       ASSERT SQLERRM = v_cases[i][3], k || ': ' || SQLERRM;
@@ -328,7 +328,7 @@ DECLARE v_u UUID := t.id('auth_banned'); v_inv UUID := t.id('inv_auth_banned');
 BEGIN
   PERFORM t.as_owner(format(
     'UPDATE auth.users SET banned_until = now() - interval ''1 second'' WHERE id = %L', v_u));
-  ASSERT public.consume_invitation(v_inv) = v_inv;
+  ASSERT t.consume(v_inv) = v_inv;
   ASSERT t.status(v_inv) = 'accepted' AND (t.profile(v_u)).is_active;
   PERFORM t.pass('consume accepts an account whose ban has expired');
 END $$;
@@ -356,7 +356,7 @@ BEGIN
   ASSERT NOT (t.v('erin@example.test', '222222')->>'is_valid')::bool, 'old code fails';
   ASSERT (t.v('erin@example.test', '666666')->>'invitation_id')::uuid = v_new, 'new code works';
   BEGIN
-    PERFORM public.consume_invitation(t.id('inv_e'));
+    PERFORM t.consume(t.id('inv_e'));
     RAISE EXCEPTION 'consumed superseded';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
   PERFORM t.pass('reissue of expired pending: old superseded, old code fails, new code works, sites/profile replaced');
@@ -403,7 +403,7 @@ BEGIN
   ASSERT NOT (t.v('alice@example.test', '111111')->>'is_valid')::bool, 'old code fails';
   ASSERT t.attempts(v_new) = 1, 'old-code guess counted on the new row';
   ASSERT (t.v('alice@example.test', '888888')->>'is_valid')::bool, 'new code works';
-  ASSERT public.consume_invitation(v_new) = v_new;
+  ASSERT t.consume(v_new) = v_new;
   ASSERT (SELECT p.is_active AND p.role = 'recycler' FROM t.profile(t.id('a')) AS p);
   PERFORM t.pass('revoke then reissue clears the lockout; superseded row keeps revoked_at/revoked_by');
 END $$;
@@ -491,7 +491,7 @@ BEGIN
   v_new := public.reissue_invitation(t.id('inv_auth_mismatch'), t.id('admin'), t.h('121212'),
     'Mismatch Fixed', 'collector', ARRAY[t.site(8)]);
   ASSERT t.status(v_new) = 'pending';
-  ASSERT public.consume_invitation(v_new) = v_new;
+  ASSERT t.consume(v_new) = v_new;
   ASSERT (t.profile(t.id('auth_mismatch'))).is_active;
   PERFORM t.pass('a confirmed but inactive user (failed acceptance) can be revoked, reissued and accepted');
 END $$;
@@ -697,7 +697,9 @@ DECLARE f TEXT; r TEXT;
   v_service_only TEXT[] := ARRAY[
     'public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)',
     'public.verify_invitation_code(text,text)',
-    'public.consume_invitation(uuid)',
+    'public.claim_invitation(uuid)',
+    'public.release_invitation_claim(uuid,uuid)',
+    'public.consume_invitation(uuid,uuid)',
     'public.reissue_invitation(uuid,uuid,text,text,public.user_role,uuid[])'];
   v_revoke TEXT := 'public.revoke_invitation(uuid)';
 BEGIN
@@ -717,7 +719,9 @@ BEGIN
   ASSERT to_regprocedure('public.accept_my_invitation()') IS NULL, 'accept_my_invitation exists';
   ASSERT to_regprocedure('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid)') IS NULL,
     'old register_invitation overload exists';
-  PERFORM t.pass('catalog: 4 functions service_role-only, revoke authenticated-only, none for anon/PUBLIC; old signatures gone');
+  ASSERT to_regprocedure('public.consume_invitation(uuid)') IS NULL,
+    'unclaimed consume_invitation(uuid) overload exists';
+  PERFORM t.pass('catalog: 6 functions service_role-only, revoke authenticated-only, none for anon/PUBLIC; old signatures gone');
 END $$;
 
 -- 29
@@ -727,7 +731,9 @@ DECLARE r TEXT; c TEXT; v_before JSONB := to_jsonb(t.inv(t.id('inv_e2')));
     format('SELECT public.register_invitation(%L, ''x@x.test'', ''X'', ''collector'', ARRAY[%L]::uuid[], %L, %L)',
            gen_random_uuid(), t.site(1), t.id('admin'), t.h('priv')),
     format('SELECT * FROM public.verify_invitation_code(''erin@example.test'', %L)', t.h('666666')),
-    format('SELECT public.consume_invitation(%L)', t.id('inv_e2')),
+    format('SELECT public.claim_invitation(%L)', t.id('inv_e2')),
+    format('SELECT public.release_invitation_claim(%L, %L)', t.id('inv_e2'), gen_random_uuid()),
+    format('SELECT public.consume_invitation(%L, %L)', t.id('inv_e2'), gen_random_uuid()),
     format('SELECT public.reissue_invitation(%L, %L, %L, ''X'', ''collector'', ARRAY[%L]::uuid[])',
            t.id('inv_h'), t.id('admin'), t.h('priv2'), t.site(1))];
 BEGIN
@@ -748,7 +754,7 @@ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   ASSERT to_jsonb(t.inv(t.id('inv_e2'))) = v_before, 'denied calls changed the row';
-  PERFORM t.pass('anon and authenticated (even with an admin JWT) are denied the 4 service functions; anon denied revoke');
+  PERFORM t.pass('anon and authenticated (even with an admin JWT) are denied the 6 service functions; anon denied revoke');
 END $$;
 
 -- 30
@@ -899,7 +905,7 @@ BEGIN
     v_u := t.id('s1b_rec_' || i);
     PERFORM t.confirm(v_u);
     ASSERT t.sites_of(v_u) = '{}';
-    ASSERT public.consume_invitation(v_inv) = v_inv;
+    ASSERT t.consume(v_inv) = v_inv;
     ASSERT t.status(v_inv) = 'accepted';
     ASSERT (SELECT p.is_active AND p.role = 'recycler' FROM t.profile(v_u) AS p);
   END LOOP;
@@ -910,7 +916,7 @@ BEGIN
   PERFORM t.confirm(v_u);
   PERFORM t.as_owner(format('DELETE FROM public.user_sites WHERE user_id = %L', v_u));
   BEGIN
-    PERFORM public.consume_invitation(v_inv);
+    PERFORM t.consume(v_inv);
     RAISE EXCEPTION 'site manager consumed without sites';
   EXCEPTION WHEN raise_exception THEN
     ASSERT SQLERRM = 'No site assignment exists for this invitation', SQLERRM;
@@ -918,7 +924,7 @@ BEGIN
   ASSERT t.status(v_inv) = 'pending' AND NOT (t.profile(v_u)).is_active;
   -- with a site again it activates
   PERFORM t.assign(v_u, t.site(6));
-  ASSERT public.consume_invitation(v_inv) = v_inv;
+  ASSERT t.consume(v_inv) = v_inv;
   ASSERT (SELECT p.is_active AND p.role = 'site_manager' FROM t.profile(v_u) AS p);
   -- (collector without sites: test 14)
   PERFORM t.pass('consume: recycler with 0 sites activates; site manager (and collector, test 14) with 0 sites refused, nothing changed');
@@ -965,7 +971,7 @@ BEGIN
   ASSERT (t.profile(v_u)).role = 'recycler';
   PERFORM t.confirm(v_u);
   ASSERT (t.v('s1b.re@example.test', 's1bre3')->>'is_valid')::bool;
-  ASSERT public.consume_invitation(v_new) = v_new;
+  ASSERT t.consume(v_new) = v_new;
   ASSERT (SELECT p.is_active AND p.role = 'recycler' FROM t.profile(v_u) AS p);
 
   -- recycler reissue with NULL sites is also accepted
@@ -977,4 +983,207 @@ BEGIN
     'recycler', NULL);
   ASSERT t.status(v_new) = 'pending' AND t.sites_of(v_u) = '{}';
   PERFORM t.pass('reissue: collector/site_manager need >= 1 site ({} and NULL refused, nothing changed); recycler may be reissued with 0 sites and then consumed');
+END $$;
+
+-- ============================================================ activation claim
+-- claim_invitation / release_invitation_claim / consume_invitation(id, token).
+-- All calls run as service_role, as the accept-invitation Edge Function does.
+-- Concurrent claims are in 50_invitations_concurrency.
+
+-- 35
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_tok UUID; v_bad UUID;
+BEGIN
+  PERFORM t.become('service_role');
+  v_u := t.mkuser('cl1', 'claim1@example.test');
+  v_inv := public.register_invitation(v_u, 'claim1@example.test', 'Claim One', 'collector',
+    ARRAY[t.site(1)], t.id('admin'), t.h('claim-1'));
+  PERFORM t.confirm(v_u);
+  ASSERT t.claim_token(v_inv) IS NULL AND t.claim_expires_at(v_inv) IS NULL, 'new row has a claim';
+
+  v_tok := public.claim_invitation(v_inv);
+  ASSERT v_tok IS NOT NULL AND t.claim_token(v_inv) = v_tok, 'claim not stored';
+  ASSERT t.claim_expires_at(v_inv) = now() + interval '2 minutes', '2-minute lease';
+  ASSERT public.claim_invitation(v_inv) IS NULL, 'second claim while the first is live';
+  ASSERT t.claim_token(v_inv) = v_tok, 'losing claim changed the token';
+  ASSERT t.attempts(v_inv) = 0, 'claims count as failed attempts';
+
+  FOREACH v_bad IN ARRAY ARRAY[NULL, gen_random_uuid()]::uuid[] LOOP
+    BEGIN
+      PERFORM public.consume_invitation(v_inv, v_bad);
+      RAISE EXCEPTION 'consumed without the claim token (%)', v_bad;
+    EXCEPTION WHEN raise_exception THEN
+      ASSERT SQLERRM = 'Invitation claim is not held', SQLERRM;
+    END;
+  END LOOP;
+  ASSERT t.status(v_inv) = 'pending' AND NOT (t.profile(v_u)).is_active;
+
+  ASSERT public.consume_invitation(v_inv, v_tok) = v_inv;
+  ASSERT t.status(v_inv) = 'accepted' AND (t.profile(v_u)).is_active;
+  ASSERT t.claim_token(v_inv) IS NULL AND t.claim_expires_at(v_inv) IS NULL, 'accept kept the claim';
+  ASSERT public.claim_invitation(v_inv) IS NULL, 'claimed an accepted invitation';
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_tok);
+    RAISE EXCEPTION 'consumed twice with the same token';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
+  PERFORM t.pass('claim: one live holder, 2-minute lease, not a failed attempt; consume needs the holder''s token; accept clears the claim');
+END $$;
+
+-- 36
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_old UUID; v_new UUID;
+BEGIN
+  PERFORM t.become('service_role');
+  v_u := t.mkuser('cl2', 'claim2@example.test');
+  v_inv := public.register_invitation(v_u, 'claim2@example.test', 'Claim Two', 'collector',
+    ARRAY[t.site(2)], t.id('admin'), t.h('claim-2'));
+  PERFORM t.confirm(v_u);
+
+  v_old := public.claim_invitation(v_inv);
+  PERFORM t.expire_claim(v_inv);                      -- holder abandoned it
+  v_new := public.claim_invitation(v_inv);
+  ASSERT v_new IS NOT NULL AND v_new <> v_old, 'expired claim was not replaced';
+  ASSERT NOT public.release_invitation_claim(v_inv, v_old), 'old token released the new claim';
+  ASSERT NOT public.release_invitation_claim(v_inv, NULL), 'NULL token released a claim';
+  ASSERT t.claim_token(v_inv) = v_new;
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_old);
+    RAISE EXCEPTION 'superseded claim holder consumed';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation claim is not held', SQLERRM; END;
+
+  ASSERT public.release_invitation_claim(v_inv, v_new), 'holder could not release';
+  ASSERT t.claim_token(v_inv) IS NULL AND t.claim_expires_at(v_inv) IS NULL;
+  ASSERT NOT public.release_invitation_claim(v_inv, v_new), 'released twice';
+  v_new := public.claim_invitation(v_inv);
+  ASSERT v_new IS NOT NULL, 'released invitation is not claimable';
+  ASSERT public.consume_invitation(v_inv, v_new) = v_inv;
+  ASSERT (t.profile(v_u)).is_active;
+  PERFORM t.pass('an expired claim is replaced and its old token can neither consume nor release; a released claim can be claimed again');
+END $$;
+
+-- 37
+DO $$
+DECLARE v_u UUID; v_inv UUID; c TEXT; v_before JSONB;
+BEGIN
+  PERFORM t.become('service_role');
+  ASSERT public.claim_invitation(gen_random_uuid()) IS NULL, 'unknown id';
+  ASSERT public.claim_invitation(NULL) IS NULL, 'NULL id';
+  FOREACH c IN ARRAY ARRAY['expired', 'locked', 'revoked', 'superseded'] LOOP
+    v_u := t.mkuser('cl3_' || c, 'claim3.' || c || '@example.test');
+    v_inv := public.register_invitation(v_u, 'claim3.' || c || '@example.test', 'C3',
+      'collector', ARRAY[t.site(3)], t.id('admin'), t.h('claim-3-' || c));
+    PERFORM t.confirm(v_u);
+    CASE c
+      WHEN 'expired' THEN PERFORM t.expire(v_inv);
+      WHEN 'locked' THEN PERFORM t.as_owner(format(
+        'UPDATE public.invitations SET failed_attempts = 5 WHERE id = %L', v_inv));
+      WHEN 'revoked' THEN PERFORM t.revoke_as(v_inv, t.id('admin'));
+      WHEN 'superseded' THEN
+        PERFORM t.revoke_as(v_inv, t.id('admin'));
+        PERFORM t.put('cl3_new', public.reissue_invitation(v_inv, t.id('admin'),
+          t.h('claim-3-new'), 'C3', 'collector', ARRAY[t.site(3)]));
+    END CASE;
+    v_before := to_jsonb(t.inv(v_inv));
+    ASSERT public.claim_invitation(v_inv) IS NULL, 'claimed a ' || c || ' invitation';
+    ASSERT to_jsonb(t.inv(v_inv)) = v_before, c || ' row changed by a refused claim';
+  END LOOP;
+  ASSERT public.claim_invitation(t.id('cl3_new')) IS NOT NULL, 'reissued invitation not claimable';
+  PERFORM t.pass('claim returns NULL and changes nothing for unknown, expired, locked, revoked and superseded invitations');
+END $$;
+
+-- 38
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_tok UUID; v_new UUID; v_tok2 UUID;
+BEGIN
+  PERFORM t.become('service_role');
+  -- revoke clears a live claim, and its holder cannot consume
+  v_u := t.mkuser('cl4', 'claim4@example.test');
+  v_inv := public.register_invitation(v_u, 'claim4@example.test', 'Claim Four', 'collector',
+    ARRAY[t.site(4)], t.id('admin'), t.h('claim-4'));
+  PERFORM t.confirm(v_u);
+  v_tok := public.claim_invitation(v_inv);
+  PERFORM t.revoke_as(v_inv, t.id('admin'));
+  ASSERT t.status(v_inv) = 'revoked' AND t.claim_token(v_inv) IS NULL
+     AND t.claim_expires_at(v_inv) IS NULL, 'revoke kept the claim';
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_tok);
+    RAISE EXCEPTION 'consumed a revoked invitation';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation is not valid', SQLERRM; END;
+
+  -- reissue: the new row starts unclaimed; the old token is useless on it
+  v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('claim-4b'), 'Claim Four',
+    'collector', ARRAY[t.site(4)]);
+  ASSERT t.claim_token(v_new) IS NULL AND t.claim_token(v_inv) IS NULL, 'reissue left a claim';
+  BEGIN
+    PERFORM public.consume_invitation(v_new, v_tok);
+    RAISE EXCEPTION 'old token consumed the reissued invitation';
+  EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'Invitation claim is not held', SQLERRM; END;
+
+  -- an expired pending invitation with a live claim can still be reissued
+  -- (the superseded row drops the claim)
+  v_tok2 := public.claim_invitation(v_new);
+  ASSERT v_tok2 IS NOT NULL, 'reissued row not claimable';
+  PERFORM t.expire(v_new);
+  v_inv := public.reissue_invitation(v_new, t.id('admin'), t.h('claim-4c'), 'Claim Four',
+    'collector', ARRAY[t.site(4)]);
+  ASSERT t.status(v_new) = 'superseded' AND t.claim_token(v_new) IS NULL, 'superseded row kept its claim';
+  ASSERT (t.v('claim4@example.test', 'claim-4c')->>'is_valid')::bool, 'new code does not verify';
+  ASSERT t.consume(v_inv) = v_inv, 'reissued row not consumable';
+  ASSERT (t.profile(v_u)).is_active, 'profile not activated';
+  PERFORM t.pass('revoke and reissue clear a live claim; the old holder cannot consume either row');
+END $$;
+
+-- 39: the accept-invitation failure path. The claim and the password are
+-- committed before consume, so a failed consume leaves a confirmed, inactive
+-- user; the Edge Function releases the claim and an admin recovers the
+-- account with revoke + reissue.
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_tok UUID; v_new UUID;
+BEGIN
+  PERFORM t.become('service_role');
+  v_u := t.mkuser('cl5', 'claim5@example.test');
+  v_inv := public.register_invitation(v_u, 'claim5@example.test', 'Claim Five', 'collector',
+    ARRAY[t.site(5)], t.id('admin'), t.h('claim-5'));
+  PERFORM t.as_owner(format('DELETE FROM public.user_sites WHERE user_id = %L', v_u));
+  ASSERT (t.v('claim5@example.test', 'claim-5')->>'is_valid')::bool;
+  v_tok := public.claim_invitation(v_inv);
+  PERFORM t.confirm(v_u);                               -- password set, email confirmed
+  BEGIN
+    PERFORM public.consume_invitation(v_inv, v_tok);
+    RAISE EXCEPTION 'consumed without sites';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'No site assignment exists for this invitation', SQLERRM;
+  END;
+  ASSERT t.claim_token(v_inv) = v_tok, 'failed consume dropped the claim';
+  ASSERT public.release_invitation_claim(v_inv, v_tok);
+  ASSERT t.status(v_inv) = 'pending' AND NOT (t.profile(v_u)).is_active;
+
+  PERFORM t.revoke_as(v_inv, t.id('admin'));
+  v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('claim-5b'), 'Claim Five',
+    'collector', ARRAY[t.site(5), t.site(6)]);
+  ASSERT (t.v('claim5@example.test', 'claim-5b')->>'is_valid')::bool;
+  v_tok := public.claim_invitation(v_new);
+  ASSERT public.consume_invitation(v_new, v_tok) = v_new;
+  ASSERT (SELECT p.is_active AND p.role = 'collector' FROM t.profile(v_u) AS p);
+  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(5), t.site(6)]);
+  PERFORM t.pass('failed consume after claim: claim released, profile inactive; revoke + reissue + claim + consume recovers');
+END $$;
+
+-- 40: claim CHECK (tamper as owner).
+DO $$
+DECLARE s TEXT; v_pending UUID := t.id('cl3_new'); v_accepted UUID := t.id('inv_c');
+  v_stmts TEXT[];
+BEGIN
+  v_stmts := ARRAY[
+    format('UPDATE public.invitations SET claim_token = gen_random_uuid(), claim_expires_at = NULL WHERE id = %L', v_pending),
+    format('UPDATE public.invitations SET claim_token = NULL, claim_expires_at = now() WHERE id = %L', v_pending),
+    format('UPDATE public.invitations SET claim_token = gen_random_uuid(), claim_expires_at = now() WHERE id = %L', v_accepted)];
+  FOREACH s IN ARRAY v_stmts LOOP
+    BEGIN
+      PERFORM t.as_owner(s);
+      RAISE EXCEPTION 'constraint allowed: %', s;
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+  END LOOP;
+  PERFORM t.pass('claim CHECK: token and expiry both or neither, and only on pending rows');
 END $$;

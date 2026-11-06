@@ -74,6 +74,14 @@ CREATE INDEX access_requests_status_idx ON public.access_requests(status);
 --
 -- Lockout: after 5 wrong codes (failed_attempts >= 5) the invitation can no
 -- longer be verified or consumed. An admin can revoke it and reissue.
+--
+-- Activation claim: accepting an invitation sets the Auth password before
+-- the database consumes the invitation, and those two steps cannot share a
+-- transaction. claim_invitation() therefore hands out a short lease
+-- (claim_token, claim_expires_at) that only one request can hold at a time;
+-- only the holder may set the password and consume. An abandoned claim
+-- simply expires, and revoke, reissue and accept all clear it. The claim
+-- columns are readable by no API role.
 CREATE TABLE public.invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   auth_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -94,6 +102,8 @@ CREATE TABLE public.invitations (
   revoked_at TIMESTAMPTZ,
   revoked_by UUID REFERENCES public.profiles(id),
   superseded_by UUID REFERENCES public.invitations(id),
+  claim_token UUID,
+  claim_expires_at TIMESTAMPTZ,
   CONSTRAINT invitation_no_admin_role
     CHECK (role <> 'admin'::public.user_role),
   CONSTRAINT invitation_acceptance_timestamp_check
@@ -116,7 +126,14 @@ CREATE TABLE public.invitations (
   CONSTRAINT invitation_superseded_by_check
     CHECK (superseded_by IS NULL OR status = 'superseded'),
   CONSTRAINT invitation_not_self_superseded
-    CHECK (superseded_by IS DISTINCT FROM id)
+    CHECK (superseded_by IS DISTINCT FROM id),
+  -- A claim has both a token and an expiry, and only a pending row can
+  -- carry one.
+  CONSTRAINT invitation_claim_check
+    CHECK (
+      (claim_token IS NULL) = (claim_expires_at IS NULL)
+      AND (claim_token IS NULL OR status = 'pending')
+    )
 );
 
 REVOKE ALL ON public.invitations FROM PUBLIC, anon, authenticated, service_role;
@@ -234,8 +251,9 @@ GRANT UPDATE (status) ON public.access_requests TO service_role;
 -- Invitations: no direct writes for anyone; all changes go through the
 -- SECURITY DEFINER functions below. Admins read rows through
 -- admin_view_invitations, and the Edge Functions (service_role) read them to
--- check for an existing pending invitation. Neither can read code_hash: the
--- definer functions read it themselves. Because these are column-level
+-- check for an existing pending invitation. Neither can read code_hash,
+-- claim_token or claim_expires_at: the definer functions read them
+-- themselves. Because these are column-level
 -- grants, callers must list columns (SELECT * is denied).
 GRANT SELECT (
   id,
@@ -440,13 +458,102 @@ REVOKE ALL ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
 GRANT EXECUTE ON FUNCTION public.verify_invitation_code(TEXT, TEXT)
   TO service_role;
 
--- CONSUME A VERIFIED INVITATION
--- Called by the Edge Function after verify_invitation_code succeeds and the
--- Auth user's email has been confirmed. Rechecks everything under a row
--- lock, so an invitation activates a profile at most once even under
--- concurrent calls. The Auth account checks are enforced here, not only in
--- the Edge Function.
-CREATE OR REPLACE FUNCTION public.consume_invitation(p_invitation_id UUID)
+-- CLAIM A VERIFIED INVITATION FOR ACTIVATION
+-- Called by the Edge Function after verify_invitation_code succeeds and
+-- before it sets the Auth password. Under a row lock: if the invitation is
+-- still pending, unexpired and not locked, and no unexpired claim exists,
+-- stores a new random claim token with a 2-minute expiry and returns the
+-- token. Otherwise returns NULL (never raises), so of two concurrent
+-- requests exactly one gets a token, and the other must not touch the
+-- password. An expired claim can be replaced, so an abandoned claim never
+-- blocks the invitation for longer than its expiry.
+CREATE OR REPLACE FUNCTION public.claim_invitation(p_invitation_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_status TEXT;
+  v_expires_at TIMESTAMPTZ;
+  v_failed_attempts INTEGER;
+  v_claim_expires_at TIMESTAMPTZ;
+  v_token UUID;
+BEGIN
+  SELECT i.status, i.expires_at, i.failed_attempts, i.claim_expires_at
+  INTO v_status, v_expires_at, v_failed_attempts, v_claim_expires_at
+  FROM public.invitations AS i
+  WHERE i.id = p_invitation_id
+  FOR UPDATE;
+
+  IF NOT FOUND
+    OR v_status <> 'pending'
+    OR v_expires_at <= NOW()
+    OR v_failed_attempts >= 5
+    OR v_claim_expires_at > NOW()
+  THEN
+    RETURN NULL;
+  END IF;
+
+  v_token := gen_random_uuid();
+
+  UPDATE public.invitations AS i
+  SET claim_token = v_token,
+      claim_expires_at = NOW() + INTERVAL '2 minutes'
+  WHERE i.id = p_invitation_id;
+
+  RETURN v_token;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.claim_invitation(UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.claim_invitation(UUID)
+  TO service_role;
+
+-- RELEASE AN ACTIVATION CLAIM
+-- Called by the Edge Function when activation fails, so the invitee can
+-- retry without waiting for the claim to expire. Only the holder's token
+-- releases it; returns whether a claim was released. Never raises.
+CREATE OR REPLACE FUNCTION public.release_invitation_claim(
+  p_invitation_id UUID,
+  p_claim_token UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  UPDATE public.invitations AS i
+  SET claim_token = NULL,
+      claim_expires_at = NULL
+  WHERE i.id = p_invitation_id
+    AND i.claim_token = p_claim_token;
+
+  RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.release_invitation_claim(UUID, UUID)
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.release_invitation_claim(UUID, UUID)
+  TO service_role;
+
+-- CONSUME A CLAIMED INVITATION
+-- Called by the Edge Function after it won claim_invitation and set the
+-- Auth password (which also confirms the email). Rechecks everything under
+-- a row lock, so an invitation activates a profile at most once even under
+-- concurrent calls, and only with the current claim token. The Auth
+-- account checks are enforced here, not only in the Edge Function. The
+-- claim's expiry is not rechecked: a newer claim replaces the token, and
+-- that is what makes an older holder fail.
+CREATE OR REPLACE FUNCTION public.consume_invitation(
+  p_invitation_id UUID,
+  p_claim_token UUID
+)
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -459,15 +566,16 @@ DECLARE
   v_status TEXT;
   v_expires_at TIMESTAMPTZ;
   v_failed_attempts INTEGER;
+  v_claim_token UUID;
   v_auth_email TEXT;
   v_email_confirmed_at TIMESTAMPTZ;
   v_deleted_at TIMESTAMPTZ;
   v_banned_until TIMESTAMPTZ;
 BEGIN
   SELECT i.auth_user_id, i.email, i.role, i.status, i.expires_at,
-         i.failed_attempts
+         i.failed_attempts, i.claim_token
   INTO v_auth_user_id, v_email, v_role, v_status, v_expires_at,
-       v_failed_attempts
+       v_failed_attempts, v_claim_token
   FROM public.invitations AS i
   WHERE i.id = p_invitation_id
   FOR UPDATE;
@@ -478,6 +586,10 @@ BEGIN
     OR v_failed_attempts >= 5
   THEN
     RAISE EXCEPTION 'Invitation is not valid';
+  END IF;
+
+  IF p_claim_token IS NULL OR v_claim_token IS DISTINCT FROM p_claim_token THEN
+    RAISE EXCEPTION 'Invitation claim is not held';
   END IF;
 
   SELECT u.email, u.email_confirmed_at, u.deleted_at, u.banned_until
@@ -528,16 +640,19 @@ BEGIN
   END IF;
 
   UPDATE public.invitations AS i
-  SET status = 'accepted', accepted_at = NOW()
+  SET status = 'accepted',
+      accepted_at = NOW(),
+      claim_token = NULL,
+      claim_expires_at = NULL
   WHERE i.id = p_invitation_id;
 
   RETURN p_invitation_id;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.consume_invitation(UUID)
+REVOKE ALL ON FUNCTION public.consume_invitation(UUID, UUID)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.consume_invitation(UUID)
+GRANT EXECUTE ON FUNCTION public.consume_invitation(UUID, UUID)
   TO service_role;
 
 -- REISSUE AN EXPIRED OR REVOKED INVITATION
@@ -657,9 +772,12 @@ BEGIN
   END IF;
 
   -- Leave 'pending' first so the one-pending-per-user index allows the new
-  -- row; superseded_by is filled in once the new row exists.
+  -- row; superseded_by is filled in once the new row exists. Any activation
+  -- claim on the old row is dropped with it.
   UPDATE public.invitations AS i
-  SET status = 'superseded'
+  SET status = 'superseded',
+      claim_token = NULL,
+      claim_expires_at = NULL
   WHERE i.id = p_old_invitation_id;
 
   INSERT INTO public.invitations (
@@ -729,7 +847,9 @@ BEGIN
   UPDATE public.invitations AS i
   SET status = 'revoked',
       revoked_at = NOW(),
-      revoked_by = v_admin_id
+      revoked_by = v_admin_id,
+      claim_token = NULL,
+      claim_expires_at = NULL
   WHERE i.id = p_invitation_id
     AND i.status = 'pending';
 

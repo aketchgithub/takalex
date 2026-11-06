@@ -142,8 +142,9 @@ Invitation flow (code-based design, already implemented in the database):
 2. The invitee receives the code (development: shown to the admin and/or captured by
    Mailpit; production: email via verified SMTP, or passed on by SMS/WhatsApp).
 3. The invitee enters email + code + new password in the app; a public Edge Function
-   calls `verify_invitation_code`, then sets the password and confirms the email, then
-   calls `consume_invitation`.
+   (`accept-invitation`) calls `verify_invitation_code`, then `claim_invitation` (a
+   short lease only one request can hold), then, as the claim holder only, sets the
+   password and confirms the email, then calls `consume_invitation` with the claim token.
 4. The account is active, with the correct role and site assignments, and the user signs in.
 
 Never expose invitation code hashes or service-role credentials to the mobile app.

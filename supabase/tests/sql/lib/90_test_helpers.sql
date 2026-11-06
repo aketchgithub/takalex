@@ -171,6 +171,33 @@ LANGUAGE sql AS $$
   FROM public.verify_invitation_code(p_email, t.h(p_code)) AS r
 $$;
 
+-- Claim, then consume with that claim's token, as the CURRENT role (not
+-- definer), as the accept-invitation Edge Function does. If the claim is
+-- refused (NULL token) on an invalid invitation, consume_invitation raises
+-- 'Invitation is not valid' first; on a valid one with a live claim held by
+-- someone else, 'Invitation claim is not held'.
+CREATE FUNCTION t.consume(p_inv UUID) RETURNS UUID
+LANGUAGE sql AS $$
+  SELECT public.consume_invitation(p_inv, public.claim_invitation(p_inv))
+$$;
+
+CREATE FUNCTION t.claim_token(p_id UUID) RETURNS UUID
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+  SELECT claim_token FROM public.invitations WHERE id = p_id
+$$;
+
+CREATE FUNCTION t.claim_expires_at(p_id UUID) RETURNS TIMESTAMPTZ
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+  SELECT claim_expires_at FROM public.invitations WHERE id = p_id
+$$;
+
+-- Make the current claim look abandoned (expired one second ago).
+CREATE FUNCTION t.expire_claim(p_id UUID) RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$
+  UPDATE public.invitations SET claim_expires_at = now() - interval '1 second'
+  WHERE id = p_id AND claim_token IS NOT NULL
+$$;
+
 -- ------------------------------------------------------------ acting roles
 -- Switch the current transaction to a role. For 'authenticated' pass the
 -- user id that auth.uid() should return (NULL = no JWT subject).

@@ -92,7 +92,9 @@ WITH expected(sig, kind, definer, anon, authn, service) AS (VALUES
   ('public.revoke_invitation(uuid)','rpc',true,false,true,false),
   ('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)','rpc',true,false,false,true),
   ('public.verify_invitation_code(text,text)','rpc',true,false,false,true),
-  ('public.consume_invitation(uuid)','rpc',true,false,false,true),
+  ('public.claim_invitation(uuid)','rpc',true,false,false,true),
+  ('public.release_invitation_claim(uuid,uuid)','rpc',true,false,false,true),
+  ('public.consume_invitation(uuid,uuid)','rpc',true,false,false,true),
   ('public.reissue_invitation(uuid,uuid,text,text,public.user_role,uuid[])','rpc',true,false,false,true),
   ('public.bootstrap_first_admin(text)','owner_only',true,false,false,false)),
 f AS (SELECT p.oid, p.oid::regprocedure::text sig, p.prosecdef, p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public')

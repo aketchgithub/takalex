@@ -106,7 +106,9 @@ INSERT INTO t.expected_functions VALUES
   ('public.revoke_invitation(uuid)',                           'rpc',        true,  false, true,  false),
   ('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)', 'rpc', true, false, false, true),
   ('public.verify_invitation_code(text,text)',                 'rpc',        true,  false, false, true),
-  ('public.consume_invitation(uuid)',                          'rpc',        true,  false, false, true),
+  ('public.claim_invitation(uuid)',                            'rpc',        true,  false, false, true),
+  ('public.release_invitation_claim(uuid,uuid)',               'rpc',        true,  false, false, true),
+  ('public.consume_invitation(uuid,uuid)',                     'rpc',        true,  false, false, true),
   ('public.reissue_invitation(uuid,uuid,text,text,public.user_role,uuid[])', 'rpc', true, false, false, true),
   ('public.bootstrap_first_admin(text)',                       'owner_only', true,  false, false, false);
 
@@ -354,24 +356,29 @@ BEGIN
   PERFORM t.pass('RLS helpers execute for authenticated inside policies; no anon/PUBLIC policy calls a helper');
 END $$;
 
--- 12: code_hash is unreadable by every API role
+-- 12: code_hash and the activation claim are unreadable by every API role
 DO $$
-DECLARE r TEXT; n BIGINT;
+DECLARE r TEXT; c TEXT; n BIGINT;
 BEGIN
   FOREACH r IN ARRAY ARRAY['public', 'anon', 'authenticated', 'service_role'] LOOP
-    ASSERT NOT has_column_privilege(r, 'public.invitations', 'code_hash', 'SELECT'), r || ' can read code_hash';
+    FOREACH c IN ARRAY ARRAY['code_hash', 'claim_token', 'claim_expires_at'] LOOP
+      ASSERT NOT has_column_privilege(r, 'public.invitations', c, 'SELECT,INSERT,UPDATE,REFERENCES'),
+        r || ' has a privilege on ' || c;
+    END LOOP;
     ASSERT NOT has_table_privilege(r, 'public.invitations', 'SELECT'), r || ' has table-level SELECT';
   END LOOP;
-  BEGIN
-    PERFORM t.become('service_role');
-    PERFORM code_hash FROM public.invitations;
-    RAISE EXCEPTION 'service_role read code_hash';
-  EXCEPTION WHEN insufficient_privilege THEN NULL;
-  END;
+  FOREACH c IN ARRAY ARRAY['code_hash', 'claim_token', 'claim_expires_at'] LOOP
+    BEGIN
+      PERFORM t.become('service_role');
+      EXECUTE format('SELECT %I FROM public.invitations', c);
+      RAISE EXCEPTION 'service_role read %', c;
+    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    END;
+  END LOOP;
   PERFORM t.become('service_role');
   SELECT count(*) INTO n FROM (SELECT id FROM public.invitations WHERE status = 'pending') s;
   PERFORM t.become('postgres');
-  PERFORM t.pass('code_hash unreadable by PUBLIC, anon, authenticated and service_role; service_role can read the other columns');
+  PERFORM t.pass('code_hash, claim_token and claim_expires_at unreadable by PUBLIC, anon, authenticated and service_role; service_role can read the other columns');
 END $$;
 
 -- 13: bootstrap_first_admin is owner-only

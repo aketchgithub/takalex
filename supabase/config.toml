@@ -39,3 +39,7 @@ enabled = false
 
 [functions.invite-user]
 verify_jwt = true
+
+# Public: invitees have no session yet. Authorised by email + one-time code.
+[functions.accept-invitation]
+verify_jwt = false
