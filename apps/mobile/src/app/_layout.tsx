@@ -50,8 +50,9 @@ export default function RootLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(collector)" />
+      <Stack.Screen name="(manager)" />
+      <Stack.Screen name="(recycler)" />
       <Stack.Screen name="(admin)" />
-      <Stack.Screen name="auth/callback" />
     </Stack>
   );
 }

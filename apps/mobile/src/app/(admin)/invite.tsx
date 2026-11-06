@@ -1,16 +1,18 @@
-
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useFocusEffect } from "expo-router";
 import { z } from "zod";
 
 import {
   Field,
+  InlineLink,
   Message,
   PrimaryButton,
   Screen,
@@ -18,35 +20,38 @@ import {
 } from "@/components/Ui";
 import { getActiveSites, type SiteOption } from "@/lib/sites";
 import { useAuthStore } from "@/stores/authStore";
+import { roleLabels, type InviteRole } from "@/types/auth";
 
-const emailSchema = z.string().trim().email("Enter a valid email address.");
+// Same limits as invite-user.
+const emailSchema = z.string().trim().max(254).email("Enter a valid email address.");
 const nameSchema = z
   .string()
   .trim()
-  .min(1, "Enter the team member's full name.")
-  .max(120, "Name must be 120 characters or fewer.");
+  .min(2, "Full name must contain between 2 and 120 characters.")
+  .max(120, "Full name must contain between 2 and 120 characters.");
 
-const roles = [
-  {
-    value: "collector",
-    label: "Collector",
-    description: "Records waste collections.",
-  },
-  {
-    value: "site_manager",
-    label: "Site Manager",
-    description: "Verifies and reviews collections.",
-  },
-  {
-    value: "recycler",
-    label: "Recycler",
-    description: "Participates in the recycling workflow.",
-  },
-] as const;
+const roles: { value: InviteRole; description: string }[] = [
+  { value: "collector", description: "Records deliveries at their site." },
+  { value: "site_manager", description: "Verifies and reviews deliveries for their sites." },
+  { value: "recycler", description: "Sees available sorted material. No site needed." },
+];
 
-type InviteRole = (typeof roles)[number]["value"];
+// Lives only in this screen's state. It is cleared when dismissed and when the
+// screen loses focus, and is never written to the auth store or to storage.
+type IssuedInvitation = {
+  code: string;
+  email: string;
+  role: InviteRole;
+  expiresAt: string | null;
+};
 
-export default function InviteCollectorScreen() {
+function formatExpiry(expiresAt: string | null): string {
+  if (!expiresAt) return "in 7 days";
+  const date = new Date(expiresAt);
+  return Number.isNaN(date.getTime()) ? "in 7 days" : date.toLocaleString();
+}
+
+export default function InviteUserScreen() {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<InviteRole>("collector");
@@ -54,13 +59,14 @@ export default function InviteCollectorScreen() {
   const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([]);
   const [isLoadingSites, setIsLoadingSites] = useState(true);
   const [siteError, setSiteError] = useState<string | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<IssuedInvitation | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
 
-  const inviteUser = useAuthStore((state) => state.inviteCollector);
+  const inviteUser = useAuthStore((state) => state.inviteUser);
   const isInviting = useAuthStore((state) => state.isInviting);
-  const authError = useAuthStore((state) => state.authError);
-  const statusMessage = useAuthStore((state) => state.statusMessage);
-  const setAuthError = useAuthStore((state) => state.setAuthError);
+
+  const sitesRequired = role !== "recycler";
 
   useEffect(() => {
     let isMounted = true;
@@ -71,16 +77,13 @@ export default function InviteCollectorScreen() {
 
       try {
         const activeSites = await getActiveSites();
-
         if (isMounted) {
           setSites(activeSites);
         }
       } catch (error: unknown) {
         if (isMounted) {
           setSiteError(
-            error instanceof Error
-              ? error.message
-              : "Could not load active sites.",
+            error instanceof Error ? error.message : "Could not load active sites.",
           );
         }
       } finally {
@@ -97,6 +100,16 @@ export default function InviteCollectorScreen() {
     };
   }, []);
 
+  // Leaving the tab or screen drops the code from memory.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setIssued(null);
+        setShareError(null);
+      };
+    }, []),
+  );
+
   function toggleSite(siteId: string) {
     setSelectedSiteIds((current) =>
       current.includes(siteId)
@@ -110,51 +123,82 @@ export default function InviteCollectorScreen() {
     const nameResult = nameSchema.safeParse(fullName);
 
     if (!emailResult.success) {
-      setValidationError(
-        emailResult.error.issues[0]?.message ?? "Enter a valid email address.",
-      );
+      setFormError(emailResult.error.issues[0]?.message ?? "Enter a valid email address.");
       return;
     }
-
     if (!nameResult.success) {
-      setValidationError(
-        nameResult.error.issues[0]?.message ?? "Enter a valid name.",
-      );
+      setFormError(nameResult.error.issues[0]?.message ?? "Enter a valid name.");
+      return;
+    }
+    if (sitesRequired && selectedSiteIds.length === 0) {
+      setFormError("Collectors and site managers must be assigned at least one site.");
       return;
     }
 
-    if (selectedSiteIds.length === 0) {
-      setValidationError("Select at least one site for this team member.");
+    setFormError(null);
+    const result = await inviteUser(emailResult.data, nameResult.data, role, selectedSiteIds);
+
+    if (!result.ok) {
+      setFormError(result.message);
       return;
     }
 
-    if (isLoadingSites || siteError || sites.length === 0) {
-      setValidationError("Active sites must be available before sending an invitation.");
-      return;
-    }
-
-    setValidationError(null);
-    setAuthError(null);
-
-    await inviteUser(
-      emailResult.data,
-      nameResult.data,
+    setIssued({
+      code: result.code,
+      email: emailResult.data.toLowerCase(),
       role,
-      selectedSiteIds,
-    );
+      expiresAt: result.expiresAt,
+    });
+    setEmail("");
+    setFullName("");
+    setSelectedSiteIds([]);
+  }
 
-    if (!useAuthStore.getState().authError) {
-      setEmail("");
-      setFullName("");
-      setSelectedSiteIds([]);
-      setValidationError(null);
+  async function shareCode(invitation: IssuedInvitation) {
+    setShareError(null);
+    try {
+      await Share.share({
+        message:
+          `You have been invited to Takalex as a ${roleLabels[invitation.role].toLowerCase()}.\n\n` +
+          `Email: ${invitation.email}\n` +
+          `Invitation code: ${invitation.code}\n\n` +
+          `Open the Takalex app, tap "I have an invitation code" and enter this email and code. ` +
+          `The code expires ${formatExpiry(invitation.expiresAt)}.`,
+      });
+    } catch {
+      setShareError("Could not open the share sheet. Copy the code from this screen instead.");
     }
+  }
+
+  function dismiss() {
+    setIssued(null);
+    setShareError(null);
+  }
+
+  if (issued) {
+    return (
+      <Screen title="Invitation created" subtitle={`For ${issued.email} (${roleLabels[issued.role]}).`}>
+        <View style={styles.codeCard}>
+          <Text style={styles.codeLabel}>Invitation code</Text>
+          <Text selectable style={styles.code}>{issued.code}</Text>
+          <Text style={styles.codeMeta}>Expires {formatExpiry(issued.expiresAt)}.</Text>
+        </View>
+        <Message tone="error">
+          This code is shown only once. Share it with the invitee now. It cannot
+          be shown again; if it is lost, the invitation must be revoked and
+          reissued.
+        </Message>
+        {shareError ? <Message tone="error">{shareError}</Message> : null}
+        <PrimaryButton label="Share code" onPress={() => void shareCode(issued)} />
+        <InlineLink label="Done, hide the code" onPress={dismiss} />
+      </Screen>
+    );
   }
 
   return (
     <Screen
       title="Invite a team member"
-      subtitle="Choose the person's role and assign them to one or more active sites. They will receive an email invitation."
+      subtitle="Choose the person's role and sites. You will get a one-time code to pass on to them."
     >
       <Field
         autoCapitalize="words"
@@ -175,7 +219,7 @@ export default function InviteCollectorScreen() {
       />
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Team member role</Text>
+        <Text style={styles.sectionTitle}>Role</Text>
 
         {roles.map((item) => {
           const selected = role === item.value;
@@ -186,33 +230,27 @@ export default function InviteCollectorScreen() {
               accessibilityRole="radio"
               accessibilityState={{ checked: selected }}
               onPress={() => setRole(item.value)}
-              style={[
-                styles.option,
-                selected ? styles.optionSelected : null,
-              ]}
+              style={[styles.option, selected ? styles.optionSelected : null]}
             >
               <View style={styles.optionContent}>
-                <Text style={styles.optionTitle}>{item.label}</Text>
-                <Text style={styles.optionDescription}>
-                  {item.description}
-                </Text>
+                <Text style={styles.optionTitle}>{roleLabels[item.value]}</Text>
+                <Text style={styles.optionDescription}>{item.description}</Text>
               </View>
 
-              <View
-                style={[
-                  styles.radio,
-                  selected ? styles.radioSelected : null,
-                ]}
-              />
+              <View style={[styles.radio, selected ? styles.radioSelected : null]} />
             </Pressable>
           );
         })}
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Assigned sites</Text>
+        <Text style={styles.sectionTitle}>
+          {sitesRequired ? "Assigned sites (at least one)" : "Assigned sites (optional)"}
+        </Text>
         <Text style={styles.helper}>
-          Select every site this person is allowed to work with.
+          {sitesRequired
+            ? "Select every site this person works at."
+            : "Recyclers do not need a site."}
         </Text>
 
         {isLoadingSites ? (
@@ -231,20 +269,10 @@ export default function InviteCollectorScreen() {
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: selected }}
                 onPress={() => toggleSite(site.id)}
-                style={[
-                  styles.siteOption,
-                  selected ? styles.siteOptionSelected : null,
-                ]}
+                style={[styles.siteOption, selected ? styles.siteOptionSelected : null]}
               >
-                <View
-                  style={[
-                    styles.checkbox,
-                    selected ? styles.checkboxSelected : null,
-                  ]}
-                >
-                  {selected ? (
-                    <Text style={styles.checkmark}>✓</Text>
-                  ) : null}
+                <View style={[styles.checkbox, selected ? styles.checkboxSelected : null]}>
+                  {selected ? <Text style={styles.checkmark}>✓</Text> : null}
                 </View>
 
                 <Text style={styles.siteName}>{site.name}</Text>
@@ -258,17 +286,11 @@ export default function InviteCollectorScreen() {
         </Text>
       </View>
 
-      {validationError ? (
-        <Message tone="error">{validationError}</Message>
-      ) : null}
-
-      {authError ? <Message tone="error">{authError}</Message> : null}
-
-      {statusMessage ? <Message>{statusMessage}</Message> : null}
+      {formError ? <Message tone="error">{formError}</Message> : null}
 
       <PrimaryButton
-        disabled={isLoadingSites || Boolean(siteError) || sites.length === 0}
-        label="Send invitation"
+        disabled={sitesRequired && (isLoadingSites || Boolean(siteError) || sites.length === 0)}
+        label="Create invitation"
         loading={isInviting}
         onPress={() => void submit()}
       />
@@ -369,5 +391,30 @@ const styles = StyleSheet.create({
   selectionCount: {
     color: uiColors.muted,
     fontSize: 12,
+  },
+  codeCard: {
+    alignItems: "center",
+    backgroundColor: uiColors.white,
+    borderColor: uiColors.primary,
+    borderRadius: 14,
+    borderWidth: 2,
+    gap: 8,
+    padding: 20,
+  },
+  codeLabel: {
+    color: uiColors.muted,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  code: {
+    color: uiColors.text,
+    fontFamily: "monospace",
+    fontSize: 28,
+    fontWeight: "800",
+    letterSpacing: 2,
+  },
+  codeMeta: {
+    color: uiColors.muted,
+    fontSize: 13,
   },
 });

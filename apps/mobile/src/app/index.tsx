@@ -15,7 +15,6 @@ export default function IndexRoute() {
   const isLoading = useAuthStore((state) => state.isLoading);
   const session = useAuthStore((state) => state.session);
   const profile = useAuthStore((state) => state.profile);
-  const invitationPending = useAuthStore((state) => state.invitationPending);
   const authError = useAuthStore((state) => state.authError);
   const signOut = useAuthStore((state) => state.signOut);
 
@@ -23,27 +22,30 @@ export default function IndexRoute() {
     return <LoadingScreen />;
   }
 
-  if (session && authError && !profile) {
-    return (
-      <Screen title="Account unavailable">
-        <Message tone="error">
-          {authError ?? "Your profile could not be loaded."}
-        </Message>
-        <PrimaryButton label="Sign out" onPress={() => void signOut()} />
-      </Screen>
-    );
-  }
-
-  if (session && invitationPending) {
-    return <Redirect href="/(auth)/register" />;
-  }
-
-  if (session && profile) {
-    if (profile.role === "admin") {
-      return <Redirect href="/(admin)" />;
+  if (session) {
+    // Missing, unreadable or inactive profile: a clear message and sign-out
+    // only. The role layouts (RoleGate) apply the same rule, so an inactive
+    // user cannot reach any role screen.
+    if (authError || !profile || !profile.is_active) {
+      return (
+        <Screen title="Account unavailable">
+          <Message tone="error">
+            {authError ?? "Your account is inactive. Ask an administrator for help."}
+          </Message>
+          <PrimaryButton label="Sign out" onPress={() => void signOut()} />
+        </Screen>
+      );
     }
-    if (profile.role === "collector") {
-      return <Redirect href="/(collector)" />;
+
+    switch (profile.role) {
+      case "admin":
+        return <Redirect href="/(admin)" />;
+      case "collector":
+        return <Redirect href="/(collector)" />;
+      case "site_manager":
+        return <Redirect href="/(manager)" />;
+      case "recycler":
+        return <Redirect href="/(recycler)" />;
     }
   }
 

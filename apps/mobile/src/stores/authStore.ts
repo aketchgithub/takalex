@@ -2,11 +2,41 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { Session, User } from "@supabase/supabase-js";
 
+import { readFunctionFailure } from "@/lib/functions";
 import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
-import { profileSchema, type Profile } from "@/types/auth";
+import { profileSchema, type InviteRole, type Profile } from "@/types/auth";
 
-type InviteRole = Exclude<Profile["role"], "admin">;
+// Fixed client copies of accept-invitation's generic messages, so every
+// invitation-validity failure reads exactly the same in the app.
+export const INVALID_INVITATION_MESSAGE =
+  "This invitation is not valid. Check the email address and code, or ask your administrator for a new invitation.";
+export const ACTIVATION_FAILED_MESSAGE =
+  "Activation failed. Contact your administrator.";
+const ACTIVATION_UNAVAILABLE_MESSAGE =
+  "Activation is temporarily unavailable. Try again in a few minutes.";
+const NETWORK_MESSAGE =
+  "Could not reach Takalex. Check your connection and try again.";
+
+export type ActivationResult =
+  | { ok: true }
+  | {
+      ok: false;
+      kind:
+        | "invalid_input"
+        | "invalid_invitation"
+        | "activation_failed"
+        | "unavailable"
+        | "network"
+        | "sign_in_failed";
+      message: string;
+    };
+
+// The invitation code is returned to the caller only. It is never written to
+// this store, so it can never be persisted (see partialize below).
+export type InviteResult =
+  | { ok: true; invitationId: string; code: string; expiresAt: string | null }
+  | { ok: false; message: string };
 
 type AuthState = {
   session: Session | null;
@@ -16,31 +46,26 @@ type AuthState = {
   isLoading: boolean;
   isHydrated: boolean;
   isInviting: boolean;
-  invitationPending: boolean;
-  phoneOtpPending: boolean;
-  pendingPhone: string | null;
+  isActivating: boolean;
   authError: string | null;
-  statusMessage: string | null;
   setIsHydrated: () => void;
   initialize: () => Promise<void>;
   loadSession: (session: Session | null) => Promise<void>;
   setSession: (session: Session | null) => void;
   signInWithPassword: (email: string, password: string) => Promise<void>;
-  requestPhoneOtp: (phone: string) => Promise<void>;
-  verifyPhoneOtp: (phone: string, token: string) => Promise<void>;
-  acceptInvitation: (password: string, phone?: string) => Promise<void>;
-  verifyPhoneChange: (phone: string, token: string) => Promise<void>;
-  finishInvitationWithoutPhone: () => Promise<void>;
-  inviteCollector: (
+  activateAccount: (
+    email: string,
+    code: string,
+    password: string,
+  ) => Promise<ActivationResult>;
+  inviteUser: (
     email: string,
     fullName: string,
     role: InviteRole,
     siteIds: string[],
-  ) => Promise<void>;
+  ) => Promise<InviteResult>;
   signOut: () => Promise<void>;
-  setInvitationPending: (pending: boolean) => void;
   setAuthError: (message: string | null) => void;
-  clearStatusMessage: () => void;
 };
 
 async function loadProfile(session: Session): Promise<void> {
@@ -49,7 +74,6 @@ async function loadProfile(session: Session): Promise<void> {
     user: session.user,
     isLoading: true,
     authError: null,
-    statusMessage: null,
   });
 
   const { data, error } = await supabase
@@ -89,6 +113,9 @@ async function loadProfile(session: Session): Promise<void> {
     return;
   }
 
+  // An inactive profile (for example after a failed activation, which can
+  // leave a user who can sign in) keeps authError set; app/index.tsx shows it
+  // and the role layouts refuse to render.
   if (!result.data.is_active) {
     useAuthStore.setState({
       session,
@@ -121,11 +148,8 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
       isHydrated: false,
       isInviting: false,
-      invitationPending: false,
-      phoneOtpPending: false,
-      pendingPhone: null,
+      isActivating: false,
       authError: null,
-      statusMessage: null,
 
       setIsHydrated: () => set({ isHydrated: true }),
 
@@ -171,11 +195,7 @@ export const useAuthStore = create<AuthState>()(
             profile: null,
             role: null,
             isLoading: false,
-            invitationPending: false,
-            phoneOtpPending: false,
-            pendingPhone: null,
             authError: null,
-            statusMessage: null,
           });
           return;
         }
@@ -205,7 +225,7 @@ export const useAuthStore = create<AuthState>()(
         set({ session, user: session?.user ?? null }),
 
       signInWithPassword: async (email, password) => {
-        set({ isLoading: true, authError: null, statusMessage: null });
+        set({ isLoading: true, authError: null });
 
         try {
           const { data, error } = await supabase.auth.signInWithPassword({
@@ -228,222 +248,128 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      requestPhoneOtp: async (phone) => {
-        set({ isLoading: true, authError: null, statusMessage: null });
+      // accept-invitation (public; email + one-time code + new password),
+      // then a normal password sign-in. The code and password are not kept.
+      activateAccount: async (email, code, password) => {
+        set({ isActivating: true, authError: null });
 
         try {
-          const { error } = await supabase.auth.signInWithOtp({
-            phone,
-            options: { shouldCreateUser: false },
-          });
-
-          set({
-            isLoading: false,
-            authError: error?.message ?? null,
-            statusMessage: error
-              ? null
-              : "Verification code sent. Enter the code from your SMS.",
-          });
-        } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not send an SMS code.",
-          });
-        }
-      },
-
-      verifyPhoneOtp: async (phone, token) => {
-        set({ isLoading: true, authError: null, statusMessage: null });
-
-        try {
-          const { data, error } = await supabase.auth.verifyOtp({
-            phone,
-            token,
-            type: "sms",
-          });
-
-          if (error) {
-            set({ isLoading: false, authError: error.message });
-            return;
-          }
-
-          await get().loadSession(data.session);
-        } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not verify the SMS code.",
-          });
-        }
-      },
-
-      acceptInvitation: async (password, phone) => {
-        set({ isLoading: true, authError: null, statusMessage: null });
-
-        try {
-          const { error } = await supabase.auth.updateUser({
-            password,
-            ...(phone ? { phone } : {}),
-          });
-
-          if (error) {
-            throw error;
-          }
-
-          if (phone) {
-            set({
-              isLoading: false,
-              phoneOtpPending: true,
-              pendingPhone: phone,
-              statusMessage: "Verification code sent to your phone.",
-            });
-            return;
-          }
-
-          const { error: acceptanceError } = await supabase.rpc(
-            "accept_my_invitation",
+          const { data, error } = await supabase.functions.invoke(
+            "accept-invitation",
+            { body: { email, code, password } },
           );
 
-          if (acceptanceError) {
-            throw acceptanceError;
+          if (error) {
+            const failure = await readFunctionFailure(error);
+            if (failure.kind === "network") {
+              return { ok: false, kind: "network", message: NETWORK_MESSAGE };
+            }
+            switch (failure.code) {
+              case "invalid_input":
+                return {
+                  ok: false,
+                  kind: "invalid_input",
+                  message: failure.message ?? "Check the details you entered.",
+                };
+              case "invalid_invitation":
+                return {
+                  ok: false,
+                  kind: "invalid_invitation",
+                  message: INVALID_INVITATION_MESSAGE,
+                };
+              case "unavailable":
+                return {
+                  ok: false,
+                  kind: "unavailable",
+                  message: ACTIVATION_UNAVAILABLE_MESSAGE,
+                };
+              default:
+                return {
+                  ok: false,
+                  kind: "activation_failed",
+                  message: ACTIVATION_FAILED_MESSAGE,
+                };
+            }
           }
 
-          set({
-            invitationPending: false,
-            phoneOtpPending: false,
-            pendingPhone: null,
-            isLoading: false,
-            authError: null,
-            statusMessage: "Your invitation has been accepted.",
-          });
+          if (data?.ok !== true) {
+            return {
+              ok: false,
+              kind: "activation_failed",
+              message: ACTIVATION_FAILED_MESSAGE,
+            };
+          }
 
-          await get().loadSession(get().session);
-        } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not complete your invitation.",
-          });
+          const { data: signIn, error: signInError } =
+            await supabase.auth.signInWithPassword({ email, password });
+
+          if (signInError || !signIn.session) {
+            return {
+              ok: false,
+              kind: "sign_in_failed",
+              message:
+                "Your account is active, but signing in failed. Sign in with your email and new password.",
+            };
+          }
+
+          await get().loadSession(signIn.session);
+          return { ok: true };
+        } catch {
+          return { ok: false, kind: "network", message: NETWORK_MESSAGE };
+        } finally {
+          set({ isActivating: false });
         }
       },
 
-      verifyPhoneChange: async (phone, token) => {
-        set({ isLoading: true, authError: null, statusMessage: null });
+      // invite-user with action "create" (admin only; the function checks the
+      // caller's JWT and is_active_admin()). The code is handed back once.
+      inviteUser: async (email, fullName, role, siteIds) => {
+        set({ isInviting: true });
 
         try {
-          const { data, error } = await supabase.auth.verifyOtp({
-            phone,
-            token,
-            type: "phone_change",
+          const { data, error } = await supabase.functions.invoke("invite-user", {
+            body: { action: "create", email, fullName, role, siteIds },
           });
 
           if (error) {
-            throw error;
+            const failure = await readFunctionFailure(error);
+            if (failure.kind === "network") {
+              return { ok: false, message: NETWORK_MESSAGE };
+            }
+            if (failure.status === 401) {
+              return {
+                ok: false,
+                message: "Your session has expired. Sign out and sign in again.",
+              };
+            }
+            return {
+              ok: false,
+              message: failure.message ?? "The invitation could not be created.",
+            };
           }
 
-          const { error: acceptanceError } = await supabase.rpc(
-            "accept_my_invitation",
-          );
-
-          if (acceptanceError) {
-            throw acceptanceError;
+          const invitationId: unknown = data?.invitationId;
+          const code: unknown = data?.code;
+          const expiresAt: unknown = data?.expiresAt;
+          if (typeof invitationId !== "string" || typeof code !== "string") {
+            return { ok: false, message: "The invitation service returned an unexpected response." };
           }
 
-          set({
-            invitationPending: false,
-            phoneOtpPending: false,
-            pendingPhone: null,
-            isLoading: false,
-            authError: null,
-            statusMessage: "Invitation accepted and phone number verified.",
-          });
-
-          await get().loadSession(data.session);
-        } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not verify the phone number.",
-          });
-        }
-      },
-
-      finishInvitationWithoutPhone: async () => {
-        set({ isLoading: true, authError: null, statusMessage: null });
-
-        try {
-          const { error } = await supabase.rpc("accept_my_invitation");
-
-          if (error) {
-            throw error;
-          }
-
-          set({
-            invitationPending: false,
-            phoneOtpPending: false,
-            pendingPhone: null,
-            isLoading: false,
-            authError: null,
-            statusMessage: "Your invitation has been accepted.",
-          });
-
-          await get().loadSession(get().session);
-        } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not complete your invitation.",
-          });
-        }
-      },
-
-      inviteCollector: async (email, fullName, role, siteIds) => {
-        set({ isInviting: true, authError: null, statusMessage: null });
-
-        try {
-          const { error } = await supabase.functions.invoke("invite-collector", {
-            body: {
-              email,
-              fullName,
-              role,
-              siteIds,
-            },
-          });
-
-          if (error) {
-            throw error;
-          }
-
-          set({
-            isInviting: false,
-            authError: null,
-            statusMessage: `Invitation sent to ${email}.`,
-          });
-        } catch (error: unknown) {
-          set({
-            isInviting: false,
-            authError:
-              error instanceof Error
-                ? error.message
-                : "Could not send the invitation.",
-            statusMessage: null,
-          });
+          return {
+            ok: true,
+            invitationId,
+            code,
+            expiresAt: typeof expiresAt === "string" ? expiresAt : null,
+          };
+        } catch {
+          return { ok: false, message: NETWORK_MESSAGE };
+        } finally {
+          set({ isInviting: false });
         }
       },
 
       signOut: async () => {
-        set({ isLoading: true, authError: null, statusMessage: null });
+        set({ isLoading: true, authError: null });
 
         try {
           const { error } = await supabase.auth.signOut({ scope: "local" });
@@ -459,11 +385,7 @@ export const useAuthStore = create<AuthState>()(
             profile: null,
             role: null,
             isLoading: false,
-            invitationPending: false,
-            phoneOtpPending: false,
-            pendingPhone: null,
             authError: null,
-            statusMessage: null,
           });
         } catch (error: unknown) {
           set({
@@ -474,20 +396,31 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      setInvitationPending: (pending) => set({ invitationPending: pending }),
       setAuthError: (message) => set({ authError: message }),
-      clearStatusMessage: () => set({ statusMessage: null }),
     }),
     {
       name: "takalex-auth-state",
       storage: createJSONStorage(() => authStorage),
+      // Only these four fields are ever written to secure storage. No
+      // invitation code, password or error text is persisted.
       partialize: (state) => ({
         session: state.session,
         user: state.user,
         profile: state.profile,
         role: state.role,
-        invitationPending: state.invitationPending,
       }),
+      // Version 1 drops fields saved by older builds (invitationPending,
+      // phone OTP state) instead of merging them back in.
+      version: 1,
+      migrate: (persisted) => {
+        const saved = (persisted ?? {}) as Partial<AuthState>;
+        return {
+          session: saved.session ?? null,
+          user: saved.user ?? null,
+          profile: saved.profile ?? null,
+          role: saved.role ?? null,
+        } as AuthState;
+      },
       onRehydrateStorage: () => (state, error) => {
         if (error) {
           const message =

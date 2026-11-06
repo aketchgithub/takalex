@@ -1,30 +1,20 @@
 import { router } from "expo-router";
 
-import { InlineLink, Message, PrimaryButton, Screen } from "@/components/Ui";
-import { useAuthStore } from "@/stores/authStore";
+import { AccountSummary } from "@/components/AccountSummary";
+import { PrimaryButton, Screen } from "@/components/Ui";
 
 export default function AdminOverview() {
-  const profile = useAuthStore((state) => state.profile);
-  const signOut = useAuthStore((state) => state.signOut);
-
   return (
-    <Screen
-      title="Admin overview"
-      subtitle={`Signed in${profile?.full_name ? ` as ${profile.full_name}` : ""}.`}
-    >
-      <Message>
-        Manage the Nairobi sites, SME groups, and collector invitations from this
-        workspace.
-      </Message>
+    <Screen title="Admin overview" subtitle="Manage invitations and access requests.">
+      <AccountSummary showSites={false} />
+      <PrimaryButton
+        label="Invite a team member"
+        onPress={() => router.push("/(admin)/invite")}
+      />
       <PrimaryButton
         label="Review access requests"
-        onPress={() => router.push("/(admin)/access-requests" as any)}
+        onPress={() => router.push("/(admin)/access-requests")}
       />
-      <PrimaryButton
-        label="Invite a collector"
-        onPress={() => router.push("/(admin)/invite" as any)}
-      />
-      <InlineLink label="Sign out" onPress={() => void signOut()} />
     </Screen>
   );
 }

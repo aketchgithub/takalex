@@ -7,6 +7,16 @@ export const userRoleSchema = z.enum([
   "admin",
 ]);
 
+// Roles an administrator can invite (invite-user rejects "admin").
+export const inviteRoleSchema = z.enum(["collector", "site_manager", "recycler"]);
+
+export const roleLabels: Record<z.infer<typeof userRoleSchema>, string> = {
+  admin: "Administrator",
+  collector: "Collector",
+  recycler: "Recycler",
+  site_manager: "Site manager",
+};
+
 export const profileSchema = z.object({
   id: z.string().uuid(),
   full_name: z.string().nullable(),
@@ -24,5 +34,6 @@ export const userSiteSchema = z.object({
 });
 
 export type UserRole = z.infer<typeof userRoleSchema>;
+export type InviteRole = z.infer<typeof inviteRoleSchema>;
 export type Profile = z.infer<typeof profileSchema>;
 export type UserSite = z.infer<typeof userSiteSchema>;

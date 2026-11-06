@@ -4,8 +4,8 @@ export default function SitesScreen() {
   return (
     <Screen title="Site management" subtitle="Admin workspace">
       <Message>
-        The six Nairobi sites can be managed here in a later implementation
-        phase.
+        Managing sites is not available in the app yet. Active sites can already
+        be assigned when you invite a team member.
       </Message>
     </Screen>
   );

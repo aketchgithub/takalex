@@ -2,9 +2,10 @@ import { Message, Screen } from "@/components/Ui";
 
 export default function CollectionHistoryScreen() {
   return (
-    <Screen title="My collections" subtitle="Collector workspace">
+    <Screen title="My deliveries" subtitle="Collector account">
       <Message>
-        Your collection history will appear here once logging is implemented.
+        You have no deliveries to show. Delivery history will appear here once
+        recording deliveries is available.
       </Message>
     </Screen>
   );
