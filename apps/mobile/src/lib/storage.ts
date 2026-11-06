@@ -2,9 +2,30 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import type { StateStorage } from "zustand/middleware";
 
-const manifestSuffix = ":manifest";
+// SecureStore keys may only contain [A-Za-z0-9._-]. Derived keys use "." as
+// the separator. manifestPrefix is part of a stored value, not a key.
+const manifestSuffix = ".manifest";
 const manifestPrefix = "chunks:";
 const maxChunkBytes = 1500;
+const SECURE_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+function assertSecureKey(key: string, what: string): string {
+  if (!SECURE_KEY_PATTERN.test(key)) {
+    throw new Error(
+      `Secure storage ${what} "${key}" is invalid: keys may only contain letters, digits, ".", "-" and "_".`,
+    );
+  }
+  return key;
+}
+
+function getManifestKey(key: string): string {
+  return assertSecureKey(`${assertSecureKey(key, "key")}${manifestSuffix}`, "manifest key");
+}
+
+// Base 36 only (0-9, a-z), so it is always valid inside a key.
+function newGeneration(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+}
 
 function splitIntoChunks(value: string): string[] {
   const chunks: string[] = [];
@@ -35,7 +56,7 @@ function splitIntoChunks(value: string): string[] {
 }
 
 function getChunkKey(key: string, generation: string, index: number): string {
-  return `${key}:chunk:${generation}:${index}`;
+  return assertSecureKey(`${key}.chunk.${generation}.${index}`, "chunk key");
 }
 
 async function removePreviousChunks(
@@ -60,7 +81,7 @@ async function removePreviousChunks(
 }
 
 async function getSecureItem(key: string): Promise<string | null> {
-  const manifestKey = `${key}${manifestSuffix}`;
+  const manifestKey = getManifestKey(key);
   const manifest = await SecureStore.getItemAsync(manifestKey);
   if (!manifest) {
     return SecureStore.getItemAsync(key);
@@ -87,9 +108,9 @@ async function getSecureItem(key: string): Promise<string | null> {
 }
 
 async function setSecureItem(key: string, value: string): Promise<void> {
-  const manifestKey = `${key}${manifestSuffix}`;
+  const manifestKey = getManifestKey(key);
   const previousManifest = await SecureStore.getItemAsync(manifestKey);
-  const generation = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  const generation = newGeneration();
   const chunks = splitIntoChunks(value);
 
   await Promise.all(
@@ -106,7 +127,7 @@ async function setSecureItem(key: string, value: string): Promise<void> {
 }
 
 async function removeSecureItem(key: string): Promise<void> {
-  const manifestKey = `${key}${manifestSuffix}`;
+  const manifestKey = getManifestKey(key);
   const manifest = await SecureStore.getItemAsync(manifestKey);
   await Promise.all([
     SecureStore.deleteItemAsync(key),
