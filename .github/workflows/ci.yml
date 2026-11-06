@@ -44,6 +44,25 @@ jobs:
       - name: Run SQL suites
         run: supabase/tests/sql/run.sh "$SQLTEST_PORT"
 
+  edge-functions:
+    name: Edge Functions (deno check and lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned to the commit of denoland/setup-deno v2.0.5.
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+        with:
+          # The Deno inside the local edge runtime (supabase/edge-runtime v1.77.9
+          # reports deno 2.1.4). Keep in step when the Supabase CLI updates it.
+          deno-version: '2.1.4'
+      - run: deno --version
+      # Every function entry point and every shared module.
+      - run: deno check --no-lock -- */*.ts
+      - run: deno lint
+
   eas-preview:
     name: EAS preview build (manual)
     if: github.event_name == 'workflow_dispatch'

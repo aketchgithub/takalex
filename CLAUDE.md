@@ -66,6 +66,7 @@ The demo brief and confirmed operating model are in docs/demo-plan.md; read it b
 - After that first deployment, every schema change must be introduced through a new migration. Never edit or rewrite an applied migration.
 
 ## Privilege rules
+- Edge Functions: `verify_jwt` only proves a valid project key (the public anon key passes it). Any function that needs a user must itself require `Authorization: Bearer`, call `getUser()` with that token, and check the role (e.g. `is_active_admin()`) before using the service-role client.
 - PostgreSQL's built-in PUBLIC EXECUTE default on new functions is not overridden; every new
   function must REVOKE/GRANT explicitly beside its definition, and 60_privileges fails if one
   doesn't.
