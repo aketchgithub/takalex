@@ -21,7 +21,7 @@ export default function AccessRequestsScreen() {
       return;
     }
 
-    setItems((data ?? []) as AccessRequestRecord[]);
+    setItems(data ?? []);
     setError(null);
   };
 
@@ -62,7 +62,7 @@ export default function AccessRequestsScreen() {
             <Message>{item.full_name}</Message>
             <Message>{item.status.toUpperCase()}</Message>
             <Message>{item.email ?? "No email"} • {item.phone ?? "No phone"}</Message>
-            <Message>Role: {item.role} • Site: {item.site_name ?? "Not provided"}</Message>
+            <Message>Role: {item.role} • Site: {item.site?.name ?? (item.site_id ? "Unknown site" : "Not provided")}</Message>
             <Message>Referral: {item.referral_source ?? "Not provided"}</Message>
             <Message>Submitted: {new Date(item.created_at).toLocaleString()}</Message>
             {item.notes ? <Message>{item.notes}</Message> : null}

@@ -1,40 +1,55 @@
--- SEED and FIRST-ADMIN BOOTSTRAP (seed.sql, migration 004).
--- Order matters: the seed and eligibility tests run while no admin exists;
--- the concurrency test creates the first admin.
+-- REAL SITES, SEED and FIRST-ADMIN BOOTSTRAP (005_sites.sql, seed.sql,
+-- migration 004). The template also holds the test-only 'FIXTURE Site n'
+-- rows from lib/90_test_helpers.sql; the site checks exclude them.
+-- Order matters: the site, seed and eligibility tests run while no admin
+-- exists; the concurrency test creates the first admin.
 SET client_min_messages = notice;
 
--- ============================================================ seed
+-- ============================================================ sites and seed
+CREATE VIEW t.real_sites AS
+  SELECT * FROM public.sites WHERE name NOT LIKE 'FIXTURE %';
+
 -- 1
 DO $$ BEGIN
-  ASSERT (SELECT count(*) FROM public.sites) = 9, 'site count';
-  ASSERT (SELECT array_agg(name ORDER BY name) FROM public.sites)
-       = (SELECT array_agg('TEST Site ' || n ORDER BY 'TEST Site ' || n) FROM generate_series(1, 9) AS n),
-       'site names';
-  ASSERT NOT EXISTS (SELECT 1 FROM public.sites WHERE NOT active);
-  ASSERT NOT EXISTS (SELECT 1 FROM public.user_sites), 'seed assigned users';
-  ASSERT NOT EXISTS (SELECT 1 FROM public.profiles), 'seed created profiles';
-  ASSERT NOT EXISTS (SELECT 1 FROM auth.users), 'seed created auth users';
-  PERFORM t.pass('seed: exactly 9 active TEST sites, no users, profiles or assignments');
+  ASSERT (SELECT array_agg(name ORDER BY name) FROM t.real_sites)
+       = ARRAY['Babadogo', 'Kariadudu', 'Kariobangi', 'Kiyambea', 'Komb Green',
+               'Mathare', 'Ng''omong''o', 'Njiru'],
+       'site names: ' || (SELECT string_agg(name, ', ' ORDER BY name) FROM t.real_sites);
+  ASSERT NOT EXISTS (SELECT 1 FROM t.real_sites WHERE NOT active), 'inactive real site';
+  ASSERT NOT EXISTS (SELECT 1 FROM t.real_sites WHERE location IS NOT NULL), 'invented coordinates';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.sites WHERE name ILIKE 'TEST%'), 'a TEST site exists';
+  ASSERT (SELECT count(*) FROM public.sites WHERE name LIKE 'FIXTURE Site %') = 9, 'fixture sites';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.user_sites), 'sites assigned to users';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.profiles), 'profiles exist';
+  ASSERT NOT EXISTS (SELECT 1 FROM auth.users), 'auth users exist';
+  PERFORM t.pass('005: exactly the 8 real sites, active, location NULL; no TEST sites; no users, profiles or assignments');
 END $$;
 
--- 2 (PostGIS shim: location is TEXT here, so this checks the literal only)
+-- 2: seed.sql adds nothing (TEST sites removed); re-running 005 and the
+-- seed inserts and changes nothing, even after an admin edit to a site.
+CREATE TABLE t.sites_before AS SELECT id, name, location, active, created_at FROM public.sites;
+\i :seed_file
 DO $$ BEGIN
   ASSERT NOT EXISTS (
-    SELECT 1 FROM public.sites
-    WHERE location !~ '^SRID=4326;POINT\(0\.00[1-9] 0\.00[1-9]\)$'), 'non-fictional location';
-  PERFORM t.pass('seed: every location is a fictional point near 0,0 (text check under the PostGIS shim)');
+    (SELECT id, name, location, active, created_at FROM public.sites)
+    EXCEPT (SELECT id, name, location, active, created_at FROM t.sites_before))
+    AND (SELECT count(*) FROM public.sites) = (SELECT count(*) FROM t.sites_before),
+    'seed.sql changed sites';
+  UPDATE public.sites SET active = false WHERE name = 'Njiru';
+  UPDATE t.sites_before SET active = false WHERE name = 'Njiru';
 END $$;
-
-CREATE TABLE t.seed_before AS SELECT id, name, created_at FROM public.sites;
-\i :seed_file
+\i :sites_file
+\i :sites_file
 
 -- 3
 DO $$ BEGIN
-  ASSERT (SELECT count(*) FROM public.sites) = 9, 'seed re-run added rows';
+  ASSERT (SELECT count(*) FROM public.sites) = (SELECT count(*) FROM t.sites_before), 're-run added rows';
   ASSERT NOT EXISTS (
-    (SELECT id, name, created_at FROM public.sites)
-    EXCEPT (SELECT id, name, created_at FROM t.seed_before)), 'seed re-run changed rows';
-  PERFORM t.pass('seed is idempotent: re-running inserts and changes nothing');
+    (SELECT id, name, location, active, created_at FROM public.sites)
+    EXCEPT (SELECT id, name, location, active, created_at FROM t.sites_before)), 're-run changed rows';
+  ASSERT (SELECT NOT active FROM public.sites WHERE name = 'Njiru'), 're-run reactivated a site';
+  UPDATE public.sites SET active = true WHERE name = 'Njiru';
+  PERFORM t.pass('seed.sql adds no sites; 005 is idempotent: re-running inserts nothing and keeps admin changes');
 END $$;
 
 -- ============================================================ bootstrap eligibility
@@ -134,7 +149,6 @@ BEGIN
     ASSERT p.role = 'admin' AND p.is_active;
     ASSERT p.full_name = 'Never Banned' AND p.phone = '+254700000002', 'name/phone';
     ASSERT p.created_at = p_before.created_at, 'created_at changed';
-    ASSERT p.group_id IS NOT DISTINCT FROM p_before.group_id;
     ASSERT (SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM public.profiles x WHERE id <> v) = v_others,
       'other profiles changed';
     RAISE EXCEPTION USING ERRCODE = 'T0001', MESSAGE = 'rollback';

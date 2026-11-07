@@ -9,7 +9,6 @@ export default function AdminLayout() {
         <Tabs.Screen name="index" options={{ title: "Overview" }} />
         <Tabs.Screen name="access-requests" options={{ title: "Access" }} />
         <Tabs.Screen name="sites" options={{ title: "Sites" }} />
-        <Tabs.Screen name="groups" options={{ title: "Groups" }} />
         <Tabs.Screen name="invite" options={{ title: "Invite" }} />
       </Tabs>
     </RoleGate>

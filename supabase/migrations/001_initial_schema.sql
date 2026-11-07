@@ -52,6 +52,10 @@ VALUES
   ('MIXED',        'Mixed',        true, false, false, 60);
 
 -- SITES
+-- Each waste picker group has the same name as its site (confirmed with
+-- Chemolex, 7 Nov), so a collector's site is their group: there is no
+-- separate groups table. The real sites are inserted by 005_sites.sql.
+-- location stays NULL until real coordinates are supplied.
 CREATE TABLE public.sites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
@@ -71,27 +75,11 @@ CREATE TABLE public.profiles (
   full_name TEXT,
   phone TEXT,
   role public.user_role NOT NULL DEFAULT 'collector',
-  group_id UUID,
   is_active BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 REVOKE ALL ON public.profiles FROM PUBLIC, anon, authenticated, service_role;
-
--- GROUPS
-CREATE TABLE public.sme_groups (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  site_id UUID REFERENCES public.sites(id),
-  leader_id UUID REFERENCES public.profiles(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-REVOKE ALL ON public.sme_groups FROM PUBLIC, anon, authenticated, service_role;
-
-ALTER TABLE public.profiles
-  ADD CONSTRAINT profiles_group_id_fkey
-  FOREIGN KEY (group_id) REFERENCES public.sme_groups(id);
 
 -- MANY-TO-MANY USER/SITE ASSIGNMENTS
 CREATE TABLE public.user_sites (
@@ -203,9 +191,9 @@ CREATE INDEX collection_logs_submitted_at_idx
 -- Device location lives on collection_logs (one per delivery), not here.
 -- Collectors may only supply collection_id, storage_path, content_type and
 -- captured_at (see column grants below); uploaded_at is always server-set
--- (enforce_collection_evidence_insert). storage_path must start with
--- {auth.uid()}/{the collection's client_record_id}/ (collectors_add_evidence).
--- The storage bucket and object-exists check come later (S2).
+-- (enforce_collection_evidence_insert). The INSERT policy
+-- (collectors_add_evidence) is created in 006_evidence_storage.sql, next to
+-- the storage bucket it depends on: until then no client can insert.
 CREATE TABLE public.collection_evidence (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   collection_id UUID NOT NULL
@@ -743,7 +731,6 @@ GRANT EXECUTE ON FUNCTION public.review_collection(UUID, BOOLEAN, JSONB, TEXT)
 -- ROW LEVEL SECURITY
 ALTER TABLE public.sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sme_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collection_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collection_evidence ENABLE ROW LEVEL SECURITY;
@@ -786,19 +773,6 @@ CREATE POLICY user_sites_read_self_or_admin
 
 CREATE POLICY user_sites_admin_manage
   ON public.user_sites FOR ALL TO authenticated
-  USING (public.is_active_admin())
-  WITH CHECK (public.is_active_admin());
-
--- GROUPS
-CREATE POLICY groups_read_authenticated
-  ON public.sme_groups FOR SELECT TO authenticated
-  USING (
-    public.is_active_admin()
-    OR public.is_active_site_member(site_id)
-  );
-
-CREATE POLICY groups_admin_manage
-  ON public.sme_groups FOR ALL TO authenticated
   USING (public.is_active_admin())
   WITH CHECK (public.is_active_admin());
 
@@ -853,25 +827,7 @@ CREATE POLICY evidence_read_permitted
     )
   );
 
--- Only on the caller's own pending collection, and only under that
--- collection's folder: {auth.uid()}/{client_record_id}/<something>.
-CREATE POLICY collectors_add_evidence
-  ON public.collection_evidence FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM public.collection_logs c
-      WHERE c.id = collection_id
-        AND c.collector_id = (SELECT auth.uid())
-        AND c.status = 'pending'
-        AND starts_with(
-          storage_path,
-          (SELECT auth.uid())::text || '/' || c.client_record_id::text || '/'
-        )
-        AND length(storage_path) >
-          length((SELECT auth.uid())::text || '/' || c.client_record_id::text || '/')
-    )
-  );
+-- INSERT: collectors_add_evidence, in 006_evidence_storage.sql.
 
 -- VERIFIED BREAKDOWN
 -- Readable by the owning collector, managers who can review the site and
@@ -916,7 +872,6 @@ CREATE POLICY events_read_permitted
 GRANT SELECT ON
   public.sites,
   public.profiles,
-  public.sme_groups,
   public.user_sites,
   public.collection_logs,
   public.collection_evidence,
@@ -951,9 +906,8 @@ GRANT INSERT (
 --                profile state before reissue/accept.
 --   sites      - validate requested site ids and name sites in emails.
 --   user_sites - read an invitee's current assignments for reissue/accept.
--- Nothing on sme_groups, collection_logs, collection_evidence,
--- collection_events, materials or collection_verified_items: no Edge
--- Function needs them.
+-- Nothing on collection_logs, collection_evidence, collection_events,
+-- materials or collection_verified_items: no Edge Function needs them.
 GRANT SELECT ON
   public.profiles,
   public.sites,

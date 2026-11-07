@@ -12,7 +12,7 @@ port = 54322
 enabled = true
 
 [db.seed]
-# Local development only: placeholder TEST sites (not real Chemolex sites).
+# Local development only. Currently empty: real sites come from migration 005.
 enabled = true
 sql_paths = ["./seed.sql"]
 

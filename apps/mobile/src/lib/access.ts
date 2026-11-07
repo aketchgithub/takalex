@@ -62,7 +62,9 @@ const emailSchema = z
   );
 
 // Used by both the request form and submitAccessRequest so they always agree.
-// Lengths mirror the access_requests CHECK constraints.
+// Lengths mirror the access_requests CHECK constraints. Collectors must choose
+// their group, which is their site (access_request_collector_site_required);
+// for site managers and recyclers the site is optional.
 export const submitAccessRequestSchema = z.object({
   full_name: z
     .string()
@@ -72,12 +74,7 @@ export const submitAccessRequestSchema = z.object({
   email: emailSchema.optional(),
   phone: phoneSchema.optional(),
   role: accessRequestRoleSchema.default("collector"),
-  site_name: z
-    .string()
-    .trim()
-    .max(120, "Site name is too long.")
-    .optional()
-    .or(z.literal("")),
+  site_id: z.string().uuid("Choose a site from the list.").nullable().optional(),
   referral_source: z
     .string()
     .trim()
@@ -87,7 +84,33 @@ export const submitAccessRequestSchema = z.object({
 }).refine(
   (data) => Boolean(data.email?.trim() || data.phone?.trim()),
   { message: "Provide an email address or phone number." },
+).refine(
+  (data) => data.role !== "collector" || Boolean(data.site_id),
+  { message: "Choose your group (site)." },
 );
+
+export type PublicSiteOption = { id: string; name: string };
+
+const publicSiteOptionsSchema = z.array(
+  z.object({ id: z.string().uuid(), name: z.string() }),
+);
+
+// Active sites for the public form, through the narrow public_site_options()
+// function (anon has no access to the sites table itself).
+export async function getPublicSiteOptions(): Promise<PublicSiteOption[]> {
+  const { data, error } = await supabase.rpc("public_site_options");
+
+  if (error) {
+    throw new Error("Could not load the list of sites. Please try again.");
+  }
+
+  const parsed = publicSiteOptionsSchema.safeParse(data ?? []);
+  if (!parsed.success) {
+    throw new Error("The list of sites could not be read.");
+  }
+
+  return parsed.data;
+}
 
 export type AccessRequestStatus = z.infer<typeof accessRequestStatusSchema>;
 export type AccessRequestRole = z.infer<typeof accessRequestRoleSchema>;
@@ -98,7 +121,8 @@ export type AccessRequestRecord = {
   email: string | null;
   phone: string | null;
   role: AccessRequestRole;
-  site_name: string | null;
+  site_id: string | null;
+  site: { name: string } | null;
   referral_source: string | null;
   status: AccessRequestStatus;
   created_at: string;
@@ -135,7 +159,7 @@ export async function submitAccessRequest(
     email: parsed.data.email?.trim() || null,
     phone: parsed.data.phone?.trim() || null,
     role: parsed.data.role,
-    site_name: parsed.data.site_name?.trim() || null,
+    site_id: parsed.data.site_id || null,
     referral_source: parsed.data.referral_source?.trim() || null,
   };
 
@@ -146,6 +170,17 @@ export async function submitAccessRequest(
   }
 
   // Do not show raw database messages to public users.
+  // 42501: the insert policy refused the row. With valid input that means
+  // the chosen site is no longer active.
+  if (error.code === "42501") {
+    return {
+      error: {
+        message:
+          "The selected site is no longer available. Reload the list and choose another site.",
+      },
+    };
+  }
+
   if (error.code === "23514") {
     return {
       error: {
@@ -162,13 +197,52 @@ export async function submitAccessRequest(
   };
 }
 
-export async function getAccessRequests() {
+// The embedded site may come back as an object or a one-element array
+// (the client has no generated types); either way it becomes { name } | null.
+const embeddedSiteSchema = z
+  .union([z.object({ name: z.string() }), z.array(z.object({ name: z.string() }))])
+  .nullable()
+  .transform((value) => (Array.isArray(value) ? value[0] ?? null : value));
+
+const accessRequestRowSchema = z.object({
+  id: z.string().uuid(),
+  full_name: z.string(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  role: accessRequestRoleSchema,
+  site_id: z.string().uuid().nullable(),
+  site: embeddedSiteSchema,
+  referral_source: z.string().nullable(),
+  status: accessRequestStatusSchema,
+  created_at: z.string(),
+  reviewed_by: z.string().uuid().nullable(),
+  reviewed_at: z.string().nullable(),
+  notes: z.string().nullable(),
+});
+
+// Explicit columns (no select("*")), with the requested site's name. Admins
+// can read every site under sites_read_assigned.
+export async function getAccessRequests(): Promise<{
+  data: AccessRequestRecord[] | null;
+  error: { message: string } | null;
+}> {
   const { data, error } = await supabase
     .from("access_requests")
-    .select("*")
+    .select(
+      "id, full_name, email, phone, role, site_id, referral_source, status, created_at, reviewed_by, reviewed_at, notes, site:sites(name)",
+    )
     .order("created_at", { ascending: false });
 
-  return { data, error };
+  if (error) {
+    return { data: null, error };
+  }
+
+  const parsed = z.array(accessRequestRowSchema).safeParse(data ?? []);
+  if (!parsed.success) {
+    return { data: null, error: { message: "Access requests could not be read." } };
+  }
+
+  return { data: parsed.data, error: null };
 }
 
 export async function updateAccessRequestStatus(

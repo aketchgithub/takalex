@@ -1,6 +1,6 @@
 -- COLLECTIONS: insert integrity, offline idempotency, review RPC with the
 -- verified breakdown, payout eligibility, finality, audit events, RLS reads,
--- evidence, materials and device location (migration 001).
+-- evidence (migrations 001 and 006), materials and device location.
 SET client_min_messages = notice;
 
 DO $$ BEGIN
@@ -499,31 +499,33 @@ BEGIN
   PERFORM t.pass('RLS reads: own rows; managers by site; recyclers none; admin all');
 END $$;
 
--- 17
+-- 17 (the exact path, object and active-collector rules are test 37)
 DO $$
-DECLARE v_c2 UUID; v_c2_rec UUID; v_a_rec UUID; v_dir TEXT; n BIGINT;
+DECLARE v_c2 UUID; v_c2_rec UUID; v_a_rec UUID; v_forged_rec UUID; v_ok TEXT; v_path TEXT; n BIGINT;
 BEGIN
   SELECT id, client_record_id INTO STRICT v_c2, v_c2_rec FROM public.collection_logs
   WHERE collector_id = t.id('c2') LIMIT 1;
   SELECT client_record_id INTO STRICT v_a_rec FROM public.collection_logs WHERE id = t.id('col_a');
-  SELECT t.id('c1') || '/' || client_record_id || '/' INTO STRICT v_dir
-  FROM public.collection_logs WHERE id = t.id('col_forged');
+  SELECT client_record_id INTO STRICT v_forged_rec FROM public.collection_logs WHERE id = t.id('col_forged');
+  v_ok := t.put_object(t.evidence_path(t.id('c1'), v_forged_rec));
   PERFORM t.as_user(t.id('c1'));
   INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-  VALUES (t.id('col_forged'), v_dir || '1.jpg', 'image/jpeg');
+  VALUES (t.id('col_forged'), v_ok, 'image/jpeg');
   BEGIN
+    v_path := t.put_object(t.evidence_path(t.id('c1'), v_c2_rec));
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (v_c2, t.id('c1') || '/' || v_c2_rec || '/1.jpg', 'image/jpeg');
+    VALUES (v_c2, v_path, 'image/jpeg');
     RAISE EXCEPTION 'evidence on another collector''s row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
+    v_path := t.put_object(t.evidence_path(t.id('c1'), v_a_rec));
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (t.id('col_a'), t.id('c1') || '/' || v_a_rec || '/1.jpg', 'image/jpeg');
+    VALUES (t.id('col_a'), v_path, 'image/jpeg');
     RAISE EXCEPTION 'evidence on a reviewed row';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (t.id('col_forged'), v_dir || '1.jpg', 'image/jpeg');
+    VALUES (t.id('col_forged'), v_ok, 'image/jpeg');
     RAISE EXCEPTION 'duplicate storage path accepted';
   EXCEPTION WHEN unique_violation THEN NULL; END;
   -- UPDATE/DELETE: either no privilege or no policy (0 rows).
@@ -1141,11 +1143,14 @@ BEGIN
   PERFORM t.pass('recyclers (single- and multi-site) read 0 rows from collections, evidence, events and verified lines; owner, site manager and admin still read them');
 END $$;
 
--- 37: evidence INSERT: column grants, server-set uploaded_at, storage path
--- prefix {auth.uid()}/{client_record_id}/, own pending collection only
+-- 37: evidence INSERT: column grants, server-set uploaded_at, the exact
+-- storage path {auth.uid()}/{client_record_id}/{uuid}.jpg, the object must
+-- exist in collection-evidence, image/jpeg, own pending collection, active
+-- collector only (policy in 006)
 DO $$
 DECLARE
-  v_id UUID; v_rec UUID; v_other UUID; v_other_rec UUID; v_dir TEXT;
+  v_id UUID; v_rec UUID; v_other UUID; v_other_rec UUID; v_dir TEXT; v_name TEXT;
+  v_ok1 TEXT; v_ok2 TEXT; v_path TEXT; v_off UUID; v_off_rec UUID := gen_random_uuid();
   r public.collection_evidence; col TEXT; n BIGINT;
   v_bad TEXT;
 BEGIN
@@ -1154,6 +1159,7 @@ BEGIN
   v_other := t.submit(t.id('c1'), 'col_ev2', t.site(1), 'PP', 4);
   v_other_rec := t.id('col_ev2_rec');
   v_dir := t.id('c1') || '/' || v_rec || '/';
+  v_name := gen_random_uuid() || '.jpg';
 
   -- column grants: exactly these four, nothing else; no UPDATE
   FOR col IN SELECT attname FROM pg_attribute
@@ -1166,48 +1172,93 @@ BEGIN
   END LOOP;
   ASSERT NOT has_table_privilege('authenticated', 'public.collection_evidence', 'INSERT');
 
+  v_ok1 := t.put_object(v_dir || gen_random_uuid() || '.jpg');
+  v_ok2 := t.put_object(v_dir || gen_random_uuid() || '.jpg');
+
   PERFORM t.as_user(t.id('c1'));
   -- uploaded_at and id cannot be supplied by the client
   BEGIN
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, uploaded_at)
-    VALUES (v_id, v_dir || 'ts.jpg', 'image/jpeg', '2000-01-01');
+    VALUES (v_id, v_ok1, 'image/jpeg', '2000-01-01');
     RAISE EXCEPTION 'client supplied uploaded_at';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     INSERT INTO public.collection_evidence (id, collection_id, storage_path, content_type)
-    VALUES (gen_random_uuid(), v_id, v_dir || 'id.jpg', 'image/jpeg');
+    VALUES (gen_random_uuid(), v_id, v_ok1, 'image/jpeg');
     RAISE EXCEPTION 'client supplied id';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 
-  -- paths outside {c1}/{v_rec}/ are refused
+  -- anything but exactly {c1}/{v_rec}/{uuid}.jpg is refused, even when an
+  -- object with that name exists
   FOREACH v_bad IN ARRAY ARRAY[
-    'photo.jpg',                                          -- no folder
-    v_rec || '/photo.jpg',                                -- missing uid
-    t.id('c1') || '/photo.jpg',                           -- missing record id
-    t.id('c1') || '/' || v_rec,                           -- no trailing slash, no file
+    v_name,                                               -- no folders
+    v_rec || '/' || v_name,                               -- missing uid
+    t.id('c1') || '/' || v_name,                          -- missing record id
     v_dir,                                                -- folder only, no file name
-    t.id('c1') || '/' || v_rec || 'x/photo.jpg',          -- record id is only a prefix
-    t.id('c2') || '/' || v_rec || '/photo.jpg',           -- another user's folder
-    t.id('c1') || '/' || v_other_rec || '/photo.jpg',     -- own, but another collection
-    upper(v_dir) || 'photo.jpg',                          -- case differs
-    '/' || v_dir || 'photo.jpg',                          -- leading slash
-    t.id('c1') || '/' || v_id || '/photo.jpg'             -- server id, not client_record_id
+    t.id('c1') || '/' || v_rec || 'x/' || v_name,         -- record id is only a prefix
+    t.id('c2') || '/' || v_rec || '/' || v_name,          -- another user's folder
+    t.id('c1') || '/' || v_other_rec || '/' || v_name,    -- own, but another collection
+    t.id('c1') || '/' || v_id || '/' || v_name,           -- server id, not client_record_id
+    upper(v_dir) || v_name,                               -- case differs (folders)
+    v_dir || upper(gen_random_uuid()::text) || '.jpg',    -- case differs (file)
+    '/' || v_dir || v_name,                               -- leading slash
+    t.id('c1') || '//' || v_rec || '/' || v_name,         -- empty segment
+    v_dir || 'thumbs/' || v_name,                         -- extra segment
+    v_dir || '../' || v_rec || '/' || v_name,             -- dot-dot
+    v_dir || '..' || v_name,                              -- dots in the file name
+    v_dir || v_name || '/x.jpg',                          -- trailing segment
+    v_dir || 'photo-1.jpg',                               -- file name not a UUID
+    v_dir || gen_random_uuid() || '.jpeg',                -- other extension
+    v_dir || gen_random_uuid() || '.JPG',
+    v_dir || gen_random_uuid() || '.png',
+    v_dir || gen_random_uuid() || '.jpg.jpg',
+    v_dir || gen_random_uuid(),                           -- no extension
+    v_dir || gen_random_uuid() || '.jpg' || E'\n'         -- trailing newline
   ] LOOP
+    PERFORM t.put_object(v_bad);
     BEGIN
+      PERFORM t.as_user(t.id('c1'));
       INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
       VALUES (v_id, v_bad, 'image/jpeg');
       RAISE EXCEPTION 'evidence path accepted: %', v_bad;
     EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   END LOOP;
 
-  -- a valid path is accepted; uploaded_at is the server's time
-  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, captured_at)
-  VALUES (v_id, v_dir || 'photo-1.jpg', 'image/jpeg', '2000-01-01');
-  -- a nested name under the folder is also fine
-  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-  VALUES (v_id, v_dir || 'thumbs/photo-1.jpg', 'image/jpeg');
+  -- a valid path with no object, or with the object only in another
+  -- bucket, is refused; so is any content type but image/jpeg
   PERFORM t.become('postgres');
-  SELECT * INTO STRICT r FROM public.collection_evidence WHERE storage_path = v_dir || 'photo-1.jpg';
+  INSERT INTO storage.buckets (id, name) VALUES ('other-bucket', 'other-bucket');
+  v_path := v_dir || gen_random_uuid() || '.jpg';
+  PERFORM t.put_object(v_path, 'other-bucket');
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_id, v_dir || gen_random_uuid() || '.jpg', 'image/jpeg');
+    RAISE EXCEPTION 'evidence accepted without a stored object';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    PERFORM t.as_user(t.id('c1'));
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_id, v_path, 'image/jpeg');
+    RAISE EXCEPTION 'evidence accepted with the object in another bucket';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  FOREACH v_bad IN ARRAY ARRAY['image/png', 'IMAGE/JPEG', 'image/jpg', ''] LOOP
+    BEGIN
+      PERFORM t.as_user(t.id('c1'));
+      INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+      VALUES (v_id, v_ok1, v_bad);
+      RAISE EXCEPTION 'content type accepted: %', v_bad;
+    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END LOOP;
+
+  -- valid paths with stored objects are accepted; uploaded_at is the server's
+  PERFORM t.as_user(t.id('c1'));
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type, captured_at)
+  VALUES (v_id, v_ok1, 'image/jpeg', '2000-01-01');
+  INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+  VALUES (v_id, v_ok2, 'image/jpeg');
+  PERFORM t.become('postgres');
+  SELECT * INTO STRICT r FROM public.collection_evidence WHERE storage_path = v_ok1;
   ASSERT r.uploaded_at = now(), 'uploaded_at is server-set';
   ASSERT r.captured_at = '2000-01-01', 'captured_at kept as device-reported';
   ASSERT (SELECT count(*) FROM public.collection_evidence WHERE collection_id = v_id) = 2;
@@ -1218,43 +1269,59 @@ BEGIN
   RETURNING * INTO r;
   ASSERT r.uploaded_at = now(), 'owner-supplied uploaded_at kept';
 
-  -- a manager, recycler, admin or inactive collector cannot add evidence to
-  -- c1's collection, even with c1's path
+  -- a manager, recycler, admin, inactive collector or other collector
+  -- cannot add evidence to c1's collection, even with a stored c1 path
   FOREACH col IN ARRAY ARRAY['m1', 'r1', 'admin', 'c_off', 'c2'] LOOP
+    v_path := t.put_object(v_dir || gen_random_uuid() || '.jpg');
     BEGIN
       PERFORM t.as_user(t.id(col));
       INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-      VALUES (v_id, v_dir || col || '.jpg', 'image/jpeg');
+      VALUES (v_id, v_path, 'image/jpeg');
       RAISE EXCEPTION '% added evidence to c1''s collection', col;
     EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   END LOOP;
+  PERFORM t.become('postgres');
+
+  -- an inactive collector cannot add evidence even to their own pending
+  -- collection (created as the owner: they could not submit one now)
+  INSERT INTO public.collection_logs (client_record_id, collector_id, site_id, material_code, reported_weight_kg)
+  VALUES (v_off_rec, t.id('c_off'), t.site(1), 'PET', 1) RETURNING id INTO v_off;
+  v_path := t.put_object(t.evidence_path(t.id('c_off'), v_off_rec));
+  BEGIN
+    PERFORM t.as_user(t.id('c_off'));
+    INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
+    VALUES (v_off, v_path, 'image/jpeg');
+    RAISE EXCEPTION 'inactive collector added evidence';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM t.become('postgres');
 
   -- service_role and anon have no INSERT at all
   BEGIN
     PERFORM t.become('service_role');
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (v_id, v_dir || 'svc.jpg', 'image/jpeg');
+    VALUES (v_id, v_dir || gen_random_uuid() || '.jpg', 'image/jpeg');
     RAISE EXCEPTION 'service_role inserted evidence';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     PERFORM t.become('anon');
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (v_id, v_dir || 'anon.jpg', 'image/jpeg');
+    VALUES (v_id, v_dir || gen_random_uuid() || '.jpg', 'image/jpeg');
     RAISE EXCEPTION 'anon inserted evidence';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM t.become('postgres');
 
-  -- once reviewed, even a correct path is refused
+  -- once reviewed, even a correct path with a stored object is refused
   PERFORM t.review_as(t.id('m1'), v_id, false, NULL, 'blurry photos');
+  v_path := t.put_object(v_dir || gen_random_uuid() || '.jpg');
   BEGIN
     PERFORM t.as_user(t.id('c1'));
     INSERT INTO public.collection_evidence (collection_id, storage_path, content_type)
-    VALUES (v_id, v_dir || 'late.jpg', 'image/jpeg');
+    VALUES (v_id, v_path, 'image/jpeg');
     RAISE EXCEPTION 'evidence added after review';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM t.become('postgres');
   SELECT count(*) INTO n FROM public.collection_evidence WHERE collection_id = v_id;
   ASSERT n = 3, 'evidence rows for col_ev: ' || n;
-  PERFORM t.pass('evidence insert: 4 client columns, server-set uploaded_at (even for owner), path must be {uid}/{client_record_id}/<name> on own pending collection');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.collection_evidence WHERE collection_id = v_off);
+  PERFORM t.pass('evidence insert: 4 client columns, server-set uploaded_at (even for owner), exact {uid}/{client_record_id}/{uuid}.jpg path with a stored collection-evidence object, image/jpeg, own pending collection, active collector only');
 END $$;

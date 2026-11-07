@@ -20,7 +20,7 @@ Never point these at the remote project. None of these files uses `--linked`.
   PGHOST=127.0.0.1 PGPORT="${BASH_REMATCH[4]}" PGUSER="${BASH_REMATCH[2]}" \
   PGPASSWORD="${BASH_REMATCH[3]}" PGDATABASE="${BASH_REMATCH[5]}" \
     psql -X -v ON_ERROR_STOP=1 -f supabase/tests/local-stack/catalog.sql |
-    tee /dev/stderr | { ! grep -Eq 'DIFF|NOT IN MATRIX|MISSING (TABLE|FUNCTION)'; }
+    tee /dev/stderr | { ! grep -Eq 'DIFF|NOT IN MATRIX|MISSING (TABLE|FUNCTION|POLICY)'; }
 ) && echo "catalog: matrix ok" || echo "catalog: DIFFERENCES (see above)"
 ```
 
@@ -33,7 +33,9 @@ This prints the effective table, column and function privileges for PUBLIC,
 anon, authenticated and service_role, with an `ok` or `DIFF` column compared
 against a copy of the matrix in `../sql/suites/60_privileges.sql` (keep the two
 in sync). It also reports RLS and ownership, the `sites.location` type, API
-role membership, default ACLs and raw ACL anomalies. It runs in a `READ ONLY`
+role membership, default ACLs and raw ACL anomalies, and checks the
+`collection-evidence` bucket configuration, the exact policies on
+`storage.objects` and the 8 real sites. It runs in a `READ ONLY`
 transaction.
 
 ## smoke.sh: PostgREST smoke tests
@@ -52,13 +54,17 @@ supabase/tests/local-stack/smoke.sh
 - Refuses to run unless the API URL is `http://127.0.0.1:<port>` and the DB URL
   is exactly `postgresql://user:pass@127.0.0.1:<port>/<db>` (anchored; no
   query string).
-- Checks anon access_request insert, select and status override; anon
+- Checks anon `public_site_options` (id and name only, inactive sites
+  hidden), anon denied on `sites` and `is_evidence_object_path`; anon
+  access_request insert with a site, collector without or with an inactive
+  site denied, recycler without a site allowed, the dropped `site_name`
+  column rejected; select and status override; anon
   `review_collection` and `bootstrap_first_admin`; service_role `code_hash`
   denial (with `limit=0`, so a regression cannot print hashes), other
   invitation columns, and `verify_invitation_code` with junk input for a
   per-run email (so no existing invitation's `failed_attempts` changes).
-- Deletes the rows it inserted (unique per-run email) on exit, including on
-  failure.
+- Creates one temporary inactive site and deletes it, and every access
+  request it inserted (unique per-run emails), on exit, including on failure.
 - Exits non-zero if any check fails.
 
 Requires `supabase`, `curl` and `psql`.
@@ -67,8 +73,8 @@ Requires `supabase`, `curl` and `psql`.
 
 Order matters:
 
-1. **Stack up:** `supabase start` (and `supabase db reset` for a clean seed; it
-   needs at least 3 active sites).
+1. **Stack up:** `supabase start` (and `supabase db reset` for a clean state).
+   It needs at least 3 active sites; migration 005 provides 8.
 2. **Functions served:** in Terminal 1, `supabase functions serve`, left running.
    The script probes `accept-invitation` first and refuses if it does not answer.
 3. **Dev admin exists:** `supabase/scripts/dev-admin.sh` (once per reset).
@@ -92,7 +98,7 @@ What it checks:
   token, the anon key and the service role key as bearer all get 401. An active
   collector gets 403 for create and for reissue. None of them creates an Auth
   user.
-- **Every role:** collector (two sites), site_manager, recycler with one
+- **Every role:** collector (one site), site_manager (one and two sites), recycler with one
   site, recycler with `siteIds` omitted, and recycler with `siteIds: []`. Each
   returns 201 with a well-formed code, a 7-day expiry and `Cache-Control: no-store`.
   Each also leaves an inactive, unconfirmed profile with the right role, a
@@ -103,7 +109,8 @@ What it checks:
   hash is also unchanged by a duplicate invite, a refused reissue and successful
   reissues.
 - **Invalid input:** bad JSON, a non-object body, a missing or unknown action,
-  a malformed email, bad names, role `admin` or missing, missing or empty sites
+  a malformed email, bad names, role `admin` or missing, two sites for a
+  collector, missing or empty sites
   for collector or site_manager, non-UUID, duplicate or too many site IDs. Each
   gets a specific 400 and creates no Auth user.
 - **Registration failure:** an unknown site passes validation, so the Auth
@@ -123,8 +130,8 @@ What it checks:
     longer works.
   - A revoked invitation is reissued with overrides. The revocation audit is
     kept, and the role, name and sites are replaced.
-  - A collector with `siteIds: []` gets 400; a recycler with no sites is
-    allowed. Role `admin` gets 400.
+  - A collector with `siteIds: []` or two sites gets 400; a recycler with
+    no sites is allowed. Role `admin` gets 400.
   - A superseded or accepted invitation gets 409.
   - A revoked row for an active user gets 409 ("already active"). For an
     inactive user who has an accepted invitation, it gets 409 ("already
@@ -141,6 +148,35 @@ What it checks:
   - Specific validation errors.
   - The consume-failure path and its recovery.
   - Every invitation-validity failure is byte-identical and takes at least 1500 ms.
+- **Evidence storage (migration 006), through the real Storage API:**
+  - Bucket: private, 2 MB, `image/jpeg` only.
+  - An active collector uploads `{uid}/{client_record_id}/{uuid}.jpg` for
+    their own pending collection. Refused: other shapes (no folders, extra
+    segment, non-UUID or uppercase file name, `.jpeg`/`.png`), another
+    collector's folder or collection, an unknown or reviewed collection, PNG
+    content, over 2 MB, an inactive collector, another collector, a site
+    manager, a recycler, the dev admin and anon. Refused uploads leave no object.
+  - Dot segments are sent raw with `node:http`, because `fetch` removes
+    them, encoded (`%2E%2E`) or not, before sending. The server also resolves
+    them before the policy runs, so inside the collector's own folder an
+    upload is either refused or stored only under the resolved exact name;
+    `..` that escapes into another collector's folder, or out of the
+    bucket, is refused; no stored name contains `..`; and every object the
+    run stored matches `{uid}/{client_record_id}/{uuid}.jpg` of that
+    collector's collection.
+  - No overwrite: re-upload, upsert, PUT and move are refused; single and bulk
+    deletes by the collector, the manager and the admin leave the object
+    unchanged.
+  - Read: the owner downloads it; the site manager and the admin get signed
+    URLs that serve it; an other-site manager, a recycler, another collector
+    and anon get neither; the public URL is refused; the owner lists the
+    folder, the recycler lists nothing.
+  - `collection_evidence`: a row for a path with no stored object, with
+    `image/png`, or by another collector is refused; the owner's row is
+    accepted once.
+  - Its users are activated through invite-user and accept-invitation; on
+    exit their objects are deleted through the Storage API and their
+    collections in SQL, before the users.
 
 Safety, as in `smoke.sh`:
 

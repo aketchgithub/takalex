@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { Message, PrimaryButton, uiColors } from "@/components/Ui";
-import { loadAccountSummary, type AccountSummary as Summary } from "@/lib/account";
+import {
+  collectorGroupLabel,
+  loadAccountSummary,
+  type AccountSummary as Summary,
+} from "@/lib/account";
 import { useAuthStore } from "@/stores/authStore";
 import { roleLabels } from "@/types/auth";
 
 // Name, role and (unless hidden) the user's assigned sites, plus the
-// collector's group, all read from the database under RLS. Ends with a
-// sign-out button.
+// collector's group ("{site name} group": each group has its site's name),
+// all read from the database under RLS. Ends with a sign-out button.
 export function AccountSummary({
   showSites = true,
   noSitesText = "You have no assigned sites. Ask an administrator to assign one.",
@@ -22,8 +26,11 @@ export function AccountSummary({
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Collectors always need their sites: the group label is derived from them.
+  const needsSites = showSites || profile?.role === "collector";
+
   useEffect(() => {
-    if (!profile || !showSites) {
+    if (!profile || !needsSites) {
       return;
     }
     let active = true;
@@ -42,7 +49,7 @@ export function AccountSummary({
     return () => {
       active = false;
     };
-  }, [profile, showSites]);
+  }, [profile, needsSites]);
 
   if (!profile) {
     return null;
@@ -57,9 +64,11 @@ export function AccountSummary({
         <Row
           label="Group"
           value={
-            !profile.group_id
-              ? "Not assigned to a group yet"
-              : summary?.group?.name ?? (error ? "Unavailable" : "Loading…")
+            error
+              ? "Unavailable"
+              : !summary
+                ? "Loading…"
+                : collectorGroupLabel(summary.sites) ?? "Not assigned to a group yet"
           }
         />
       ) : null}

@@ -108,6 +108,16 @@ function validateSiteIds(value: unknown): Result<string[]> {
 
 const SITES_REQUIRED =
   "Collectors and site managers must be assigned at least one site.";
+// A collector's site is their group (Chemolex, 7 Nov).
+const COLLECTOR_ONE_SITE = "A collector must be assigned exactly one site.";
+
+// Site-count rule per role, checked before any Auth user is created; the
+// database functions enforce the same rule.
+function siteCountError(role: InviteRole, siteIds: string[]): string | null {
+  if (role !== "recycler" && siteIds.length === 0) return SITES_REQUIRED;
+  if (role === "collector" && siteIds.length !== 1) return COLLECTOR_ONE_SITE;
+  return null;
+}
 
 function validateCreate(body: Record<string, unknown>): Result<CreateInput> {
   const email =
@@ -130,8 +140,9 @@ function validateCreate(body: Record<string, unknown>): Result<CreateInput> {
     if (!sites.ok) return sites;
     siteIds = sites.data;
   }
-  if (role !== "recycler" && siteIds.length === 0) {
-    return { ok: false, error: SITES_REQUIRED };
+  const siteError = siteCountError(role, siteIds);
+  if (siteError) {
+    return { ok: false, error: siteError };
   }
 
   return { ok: true, data: { email, fullName: fullName.data, role, siteIds } };
@@ -199,6 +210,7 @@ const DB_MESSAGES: Array<[string, number, string]> = [
   ["A full name is required", 400,
     "Full name must contain between 2 and 120 characters."],
   ["At least one site assignment is required", 400, SITES_REQUIRED],
+  ["A collector must be assigned exactly one site", 400, COLLECTOR_ONE_SITE],
   ["Duplicate site assignments are not allowed", 400,
     "Duplicate site assignments are not allowed."],
   ["One or more selected sites are invalid or inactive", 400,
@@ -361,8 +373,9 @@ async function handleReissue(
     }
     siteIds = (rows ?? []).map((row: { site_id: string }) => row.site_id);
   }
-  if (role !== "recycler" && siteIds.length === 0) {
-    return respond(400, { error: SITES_REQUIRED });
+  const siteError = siteCountError(role, siteIds);
+  if (siteError) {
+    return respond(400, { error: siteError });
   }
 
   const code = generateCode();

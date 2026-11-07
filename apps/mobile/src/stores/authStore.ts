@@ -78,7 +78,7 @@ async function loadProfile(session: Session): Promise<void> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, full_name, phone, role, group_id, is_active, created_at")
+    .select("id, full_name, phone, role, is_active, created_at")
     .eq("id", session.user.id)
     .maybeSingle();
 

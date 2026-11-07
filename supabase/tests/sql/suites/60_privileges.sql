@@ -42,9 +42,9 @@ END $$;
 CREATE TABLE t.expected_tables (tbl TEXT, role TEXT, privs TEXT, PRIMARY KEY (tbl, role));
 INSERT INTO t.expected_tables VALUES
   ('access_requests', 'public',        '- | -'),
-  ('access_requests', 'anon',          '- | INSERT(email,full_name,phone,referral_source,role,site_name)'),
-  ('access_requests', 'authenticated', 'SELECT | INSERT(email,full_name,phone,referral_source,role,site_name) UPDATE(notes,status)'),
-  ('access_requests', 'service_role',  '- | SELECT(email,full_name,id,phone,role,site_name,status) UPDATE(status)'),
+  ('access_requests', 'anon',          '- | INSERT(email,full_name,phone,referral_source,role,site_id)'),
+  ('access_requests', 'authenticated', 'SELECT | INSERT(email,full_name,phone,referral_source,role,site_id) UPDATE(notes,status)'),
+  ('access_requests', 'service_role',  '- | SELECT(email,full_name,id,phone,role,site_id,status) UPDATE(status)'),
   ('collection_events', 'public',        '- | -'),
   ('collection_events', 'anon',          '- | -'),
   ('collection_events', 'authenticated', 'SELECT | -'),
@@ -77,10 +77,6 @@ INSERT INTO t.expected_tables VALUES
   ('sites', 'anon',          '- | -'),
   ('sites', 'authenticated', 'SELECT | -'),
   ('sites', 'service_role',  'SELECT | -'),
-  ('sme_groups', 'public',        '- | -'),
-  ('sme_groups', 'anon',          '- | -'),
-  ('sme_groups', 'authenticated', 'SELECT | -'),
-  ('sme_groups', 'service_role',  '- | -'),
   ('user_sites', 'public',        '- | -'),
   ('user_sites', 'anon',          '- | -'),
   ('user_sites', 'authenticated', 'SELECT | -'),
@@ -102,6 +98,8 @@ INSERT INTO t.expected_functions VALUES
   ('public.is_active_admin()',                                 'rls_helper', true,  false, true,  false),
   ('public.is_active_site_member(uuid)',                       'rls_helper', true,  false, true,  false),
   ('public.can_review_site(uuid)',                             'rls_helper', true,  false, true,  false),
+  ('public.is_evidence_object_path(text,uuid,uuid)',           'rls_helper', false, false, true,  false),
+  ('public.public_site_options()',                             'rpc',        true,  true,  true,  false),
   ('public.review_collection(uuid,boolean,jsonb,text)',        'rpc',        true,  false, true,  false),
   ('public.revoke_invitation(uuid)',                           'rpc',        true,  false, true,  false),
   ('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)', 'rpc', true, false, false, true),
@@ -335,14 +333,16 @@ BEGIN
   PERFORM t.pass('handle_new_auth_user fires for an inserting role without EXECUTE on it (trigger EXECUTE is not checked)');
 END $$;
 
--- 11: RLS helpers: authenticated can run them inside policies; no policy that
--- applies to anon/PUBLIC calls any public function
+-- 11: RLS helpers: authenticated can run them inside policies; the only
+-- public function any anon/PUBLIC policy calls is public_site_options()
+-- (the narrow, anon-executable site list), checked through pg_depend
 DO $$
-DECLARE n BIGINT; v_bad TEXT;
+DECLARE n BIGINT; v_bad TEXT; v_total BIGINT;
 BEGIN
+  SELECT count(*) INTO v_total FROM public.sites;
   PERFORM t.as_user(t.id('admin'));
   SELECT count(*) INTO n FROM public.sites;              -- sites_read_assigned -> is_active_admin
-  ASSERT n = 9, 'admin saw ' || n || ' sites';
+  ASSERT n = v_total AND n > 0, 'admin saw ' || n || ' of ' || v_total || ' sites';
   SELECT count(*) INTO n FROM public.access_requests;    -- (SELECT is_active_admin())
   PERFORM t.become('postgres');
 
@@ -353,7 +353,18 @@ BEGIN
     AND (COALESCE(qual, '') || ' ' || COALESCE(with_check, '')) ~*
         '(is_active_admin|is_active_site_member|can_review_site|review_collection|invitation|bootstrap)';
   ASSERT v_bad IS NULL, 'policies for anon/PUBLIC call public functions: ' || v_bad;
-  PERFORM t.pass('RLS helpers execute for authenticated inside policies; no anon/PUBLIC policy calls a helper');
+
+  SELECT string_agg(DISTINCT pol.polname || ' -> ' || d.refobjid::regprocedure::text, ', ') INTO v_bad
+  FROM pg_policy pol
+  JOIN pg_depend d ON d.classid = 'pg_policy'::regclass AND d.objid = pol.oid
+                  AND d.refclassid = 'pg_proc'::regclass
+  JOIN pg_proc p ON p.oid = d.refobjid
+  JOIN pg_namespace pn ON pn.oid = p.pronamespace
+  WHERE (pol.polroles @> ARRAY[0::oid] OR pol.polroles @> ARRAY['anon'::regrole::oid])
+    AND pn.nspname = 'public'
+    AND d.refobjid <> 'public.public_site_options()'::regprocedure;
+  ASSERT v_bad IS NULL, 'anon/PUBLIC policies depend on public functions: ' || v_bad;
+  PERFORM t.pass('RLS helpers execute for authenticated inside policies; anon/PUBLIC policies call no public function but public_site_options()');
 END $$;
 
 -- 12: code_hash and the activation claim are unreadable by every API role

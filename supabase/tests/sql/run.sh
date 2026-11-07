@@ -4,8 +4,8 @@
 #   supabase/tests/sql/run.sh <port>
 #
 # Creates an isolated, temporary PostgreSQL cluster listening only on
-# 127.0.0.1:<port> (no Unix socket), applies the Supabase stubs, migrations
-# 001-004 and the seed into a template database, then runs every
+# 127.0.0.1:<port> (no Unix socket), applies the Supabase stubs, every
+# migration in order and the seed into a template database, then runs every
 # suites/*.sql file in its own fresh copy of that template. The cluster and
 # its directory are always removed afterwards, including on failure or
 # Ctrl-C.
@@ -137,7 +137,7 @@ if [[ "$ACTUAL" != "$TOKEN|$DATA" ]]; then
 fi
 
 # --- template database ------------------------------------------------------
-echo "building template: stubs, migrations 001-004, seed, helpers"
+echo "building template: stubs, migrations, seed, helpers"
 P -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE takalex_template"
 T() { P -d takalex_template -v ON_ERROR_STOP=1 "$@"; }
 
@@ -161,8 +161,15 @@ if grep -qiE 'postgis|geography|gist' "$SHIMMED"; then
 fi
 T -f "$SHIMMED"
 
-for m in 002_auth_profiles 003_public_access_flow 004_admin_bootstrap; do
-  T -f "$MIGRATIONS/$m.sql"
+# Every other migration, in file-name order (as the Supabase CLI applies them).
+shopt -s nullglob
+MIGRATION_FILES=("$MIGRATIONS"/[0-9][0-9][0-9]_*.sql)
+shopt -u nullglob
+[[ "$(basename "${MIGRATION_FILES[0]:-}")" == 001_initial_schema.sql ]] ||
+  { echo "expected 001_initial_schema.sql to be the first migration" >&2; exit 1; }
+for m in "${MIGRATION_FILES[@]:1}"; do
+  echo "  applying $(basename "$m")"
+  T -f "$m"
 done
 T -f "$SEED"
 T -f "$HERE/lib/90_test_helpers.sql"
@@ -181,7 +188,8 @@ for suite in "${SUITES[@]}"; do
     -c "CREATE DATABASE \"$db\" TEMPLATE takalex_template" >/dev/null
   out="$WORK/$name.out"
   set +e
-  P -d "$db" -v VERBOSITY=terse -v seed_file="$SEED" -f "$suite" >"$out" 2>&1
+  P -d "$db" -v VERBOSITY=terse -v seed_file="$SEED" \
+    -v sites_file="$MIGRATIONS/005_sites.sql" -f "$suite" >"$out" 2>&1
   psql_status=$?
   set -e
   planned=$(grep -c 'PERFORM t\.pass(' "$suite" || true)

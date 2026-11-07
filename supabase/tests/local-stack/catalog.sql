@@ -7,6 +7,9 @@
 -- public, next to the expected values. The expected values are a copy of
 -- the matrix in supabase/tests/sql/suites/60_privileges.sql: keep the two in
 -- sync. Any row whose last column is not "ok" is a difference.
+-- It also checks the collection-evidence bucket and the policies on
+-- storage.objects (migration 006), which the stand-in suites can only
+-- partly cover, and the real sites (migration 005).
 -- Runs in a READ ONLY transaction and creates nothing.
 BEGIN TRANSACTION READ ONLY;
 \pset pager off
@@ -26,9 +29,9 @@ cl AS (SELECT relname, role, string_agg(priv||'('||cols||')', ' ' ORDER BY ord) 
 actual AS (SELECT tabl.relname AS tbl, tabl.role, COALESCE(tl,'-')||' | '||COALESCE(cl.cl,'-') AS privs FROM tabl LEFT JOIN cl USING (relname, role)),
 expected(tbl, role, privs) AS (VALUES
   ('access_requests', 'public',        '- | -'),
-  ('access_requests', 'anon',          '- | INSERT(email,full_name,phone,referral_source,role,site_name)'),
-  ('access_requests', 'authenticated', 'SELECT | INSERT(email,full_name,phone,referral_source,role,site_name) UPDATE(notes,status)'),
-  ('access_requests', 'service_role',  '- | SELECT(email,full_name,id,phone,role,site_name,status) UPDATE(status)'),
+  ('access_requests', 'anon',          '- | INSERT(email,full_name,phone,referral_source,role,site_id)'),
+  ('access_requests', 'authenticated', 'SELECT | INSERT(email,full_name,phone,referral_source,role,site_id) UPDATE(notes,status)'),
+  ('access_requests', 'service_role',  '- | SELECT(email,full_name,id,phone,role,site_id,status) UPDATE(status)'),
   ('collection_events', 'public',        '- | -'),
   ('collection_events', 'anon',          '- | -'),
   ('collection_events', 'authenticated', 'SELECT | -'),
@@ -61,10 +64,6 @@ expected(tbl, role, privs) AS (VALUES
   ('sites', 'anon',          '- | -'),
   ('sites', 'authenticated', 'SELECT | -'),
   ('sites', 'service_role',  'SELECT | -'),
-  ('sme_groups', 'public',        '- | -'),
-  ('sme_groups', 'anon',          '- | -'),
-  ('sme_groups', 'authenticated', 'SELECT | -'),
-  ('sme_groups', 'service_role',  '- | -'),
   ('user_sites', 'public',        '- | -'),
   ('user_sites', 'anon',          '- | -'),
   ('user_sites', 'authenticated', 'SELECT | -'),
@@ -88,6 +87,8 @@ WITH expected(sig, kind, definer, anon, authn, service) AS (VALUES
   ('public.is_active_admin()','rls_helper',true,false,true,false),
   ('public.is_active_site_member(uuid)','rls_helper',true,false,true,false),
   ('public.can_review_site(uuid)','rls_helper',true,false,true,false),
+  ('public.is_evidence_object_path(text,uuid,uuid)','rls_helper',false,false,true,false),
+  ('public.public_site_options()','rpc',true,true,true,false),
   ('public.review_collection(uuid,boolean,jsonb,text)','rpc',true,false,true,false),
   ('public.revoke_invitation(uuid)','rpc',true,false,true,false),
   ('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)','rpc',true,false,false,true),
@@ -135,4 +136,34 @@ SELECT obj, CASE WHEN grantee_oid=0 THEN 'PUBLIC' ELSE pg_get_userbyid(grantee_o
   UNION ALL SELECT p.oid::regprocedure::text, a.grantee, a.privilege_type, a.is_grantable, p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace, aclexplode(p.proacl) a WHERE n.nspname='public') s
 WHERE grantee_oid=0 OR (grantee_oid<>owner AND (is_grantable OR pg_get_userbyid(grantee_oid) NOT IN ('anon','authenticated','service_role')));
 SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proacl IS NULL;
+
+\echo === storage: collection-evidence bucket (migration 006)
+SELECT 'bucket collection-evidence' AS item,
+  COALESCE((SELECT format('public=%s size=%s mime=%s', public, file_size_limit, allowed_mime_types)
+            FROM storage.buckets WHERE id = 'collection-evidence'), '<missing>') AS actual,
+  CASE WHEN (SELECT public = false AND file_size_limit = 2097152 AND allowed_mime_types = ARRAY['image/jpeg']
+             FROM storage.buckets WHERE id = 'collection-evidence') THEN 'ok'
+       ELSE 'DIFF expected: public=f size=2097152 mime={image/jpeg}' END AS vs_expected;
+
+\echo === storage: policies on storage.objects (exactly these; no UPDATE/DELETE/ALL)
+WITH expected(policyname, cmd, roles) AS (VALUES
+  ('collection_evidence_objects_insert', 'INSERT', 'authenticated'),
+  ('collection_evidence_objects_select', 'SELECT', 'authenticated')),
+actual AS (SELECT policyname::text, cmd, array_to_string(roles, ',') AS roles
+           FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects')
+SELECT COALESCE(a.policyname, e.policyname) policyname, a.cmd, a.roles,
+  CASE WHEN e.policyname IS NULL THEN 'NOT IN MATRIX' WHEN a.policyname IS NULL THEN 'MISSING POLICY'
+       WHEN a.cmd = e.cmd AND a.roles = e.roles THEN 'ok' ELSE 'DIFF expected: ' || e.cmd || ' ' || e.roles END vs_expected
+FROM actual a FULL JOIN expected e USING (policyname) ORDER BY 1;
+SELECT 'storage.objects RLS enabled' AS item,
+  CASE WHEN (SELECT relrowsecurity FROM pg_class WHERE oid = 'storage.objects'::regclass) THEN 'ok' ELSE 'DIFF' END AS vs_expected;
+
+\echo === sites (migration 005): the 8 real sites, active, location NULL
+SELECT 'real sites' AS item,
+  (SELECT string_agg(name, ', ' ORDER BY name) FROM public.sites) AS actual,
+  CASE WHEN (SELECT array_agg(name ORDER BY name) FROM public.sites WHERE active AND location IS NULL)
+            @> ARRAY['Babadogo','Kariadudu','Kariobangi','Kiyambea','Komb Green','Mathare','Ng''omong''o','Njiru']
+       THEN 'ok' ELSE 'DIFF' END AS vs_expected;
+SELECT 'no TEST sites' AS item,
+  CASE WHEN NOT EXISTS (SELECT 1 FROM public.sites WHERE name ILIKE 'TEST%') THEN 'ok' ELSE 'DIFF' END AS vs_expected;
 ROLLBACK;

@@ -86,17 +86,39 @@ LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$
   INSERT INTO public.user_sites (user_id, site_id) VALUES (p_user, p_site)
 $$;
 
+-- Test-only fixture sites, created in the template database (never in
+-- seed.sql or a migration). Tests use these rather than the real sites from
+-- 005_sites.sql, so they do not depend on the real site list.
+INSERT INTO public.sites (name, active)
+SELECT 'FIXTURE Site ' || n, true FROM generate_series(1, 9) AS n;
+
 CREATE FUNCTION t.site(p_n INTEGER) RETURNS UUID
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
 DECLARE v_id UUID;
 BEGIN
   SELECT s.id INTO v_id FROM public.sites AS s
-  WHERE s.name = 'TEST Site ' || p_n;
+  WHERE s.name = 'FIXTURE Site ' || p_n;
   IF v_id IS NULL THEN
-    RAISE EXCEPTION 'seed site % is missing', p_n;
+    RAISE EXCEPTION 'fixture site % is missing', p_n;
   END IF;
   RETURN v_id;
 END $$;
+
+-- ------------------------------------------------------------ storage
+-- A valid evidence object path for (collector, client_record_id).
+CREATE FUNCTION t.evidence_path(p_user UUID, p_rec UUID) RETURNS TEXT
+LANGUAGE sql VOLATILE AS $$
+  SELECT p_user::text || '/' || p_rec::text || '/' || gen_random_uuid()::text || '.jpg'
+$$;
+
+-- Ground-truth stand-in for a Storage API upload: an object row in the
+-- collection-evidence bucket, inserted as the owner (no RLS).
+CREATE FUNCTION t.put_object(p_name TEXT, p_bucket TEXT DEFAULT 'collection-evidence')
+RETURNS TEXT
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$
+  INSERT INTO storage.objects (bucket_id, name) VALUES (p_bucket, p_name)
+  RETURNING name
+$$;
 
 CREATE FUNCTION t.sorted(p UUID[]) RETURNS UUID[]
 LANGUAGE sql IMMUTABLE AS $$

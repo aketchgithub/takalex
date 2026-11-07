@@ -1,12 +1,14 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 
 import { Field, Message, PrimaryButton, Screen, uiColors } from "@/components/Ui";
 import {
+  getPublicSiteOptions,
   submitAccessRequest,
   submitAccessRequestSchema,
   type AccessRequestRole,
+  type PublicSiteOption,
 } from "@/lib/access";
 
 const ROLE_OPTIONS: { value: AccessRequestRole; label: string }[] = [
@@ -20,11 +22,58 @@ export default function RequestAccessScreen() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<AccessRequestRole>("collector");
-  const [siteName, setSiteName] = useState("");
+  const [siteId, setSiteId] = useState<string | null>(null);
+  const [siteOptions, setSiteOptions] = useState<PublicSiteOption[]>([]);
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState<string | null>(null);
   const [referralSource, setReferralSource] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Active sites come from public_site_options() (id and name only).
+  // sitesRequest changes to reload the list (initial load, "Try again", and
+  // after a refused submission).
+  const [sitesRequest, setSitesRequest] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    getPublicSiteOptions()
+      .then((options) => {
+        if (!active) {
+          return;
+        }
+        setSiteOptions(options);
+        setSitesError(null);
+        // Drop a selection that is no longer offered.
+        setSiteId((current) =>
+          current && options.some((option) => option.id === current) ? current : null,
+        );
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setSitesError(
+            loadError instanceof Error ? loadError.message : "Could not load the list of sites.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSitesLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [sitesRequest]);
+
+  const loadSites = useCallback(() => {
+    setSitesLoading(true);
+    setSitesError(null);
+    setSitesRequest((n) => n + 1);
+  }, []);
+
+  const isCollector = role === "collector";
 
   const submit = async () => {
     // Same schema submitAccessRequest uses, including the
@@ -34,7 +83,7 @@ export default function RequestAccessScreen() {
       email,
       phone,
       role,
-      site_name: siteName,
+      site_id: siteId,
       referral_source: referralSource,
     });
 
@@ -54,6 +103,8 @@ export default function RequestAccessScreen() {
 
     if (submitError) {
       setError(submitError.message);
+      // A refused site may have been deactivated meanwhile: refresh the list.
+      loadSites();
       return;
     }
 
@@ -63,7 +114,7 @@ export default function RequestAccessScreen() {
     setFullName("");
     setEmail("");
     setPhone("");
-    setSiteName("");
+    setSiteId(null);
     setReferralSource("");
     setRole("collector");
   };
@@ -134,12 +185,60 @@ export default function RequestAccessScreen() {
           })}
         </View>
       </View>
-      <Field
-        label="Site name or area"
-        value={siteName}
-        onChangeText={setSiteName}
-        placeholder="Nairobi West"
-      />
+      <View style={styles.roleField}>
+        <Text nativeID="site-label" style={styles.roleLabel}>
+          {isCollector ? "Your group (site)" : "Site (optional)"}
+        </Text>
+        {isCollector ? (
+          <Text style={styles.hint}>Each waste picker group has the same name as its site.</Text>
+        ) : null}
+        {sitesLoading ? (
+          <ActivityIndicator color={uiColors.primary} />
+        ) : sitesError ? (
+          <>
+            <Message tone="error">{sitesError}</Message>
+            <PrimaryButton label="Try again" onPress={loadSites} />
+          </>
+        ) : siteOptions.length === 0 ? (
+          <Message>No sites are available at the moment.</Message>
+        ) : (
+          <View
+            accessibilityLabelledBy="site-label"
+            accessibilityRole="radiogroup"
+            style={styles.roleOptions}
+          >
+            {siteOptions.map((option) => {
+              const selected = siteId === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityLabel={option.name}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected, disabled: loading }}
+                  disabled={loading}
+                  // Tapping the selected site clears it (sites are optional
+                  // for site managers and recyclers).
+                  onPress={() => setSiteId(selected ? null : option.id)}
+                  style={({ pressed }) => [
+                    styles.roleOption,
+                    selected ? styles.roleOptionSelected : null,
+                    pressed && !selected ? styles.roleOptionPressed : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.roleOptionText,
+                      selected ? styles.roleOptionTextSelected : null,
+                    ]}
+                  >
+                    {option.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
       <Field
         label="How did you hear about Takalex?"
         value={referralSource}
@@ -167,6 +266,10 @@ const styles = StyleSheet.create({
     color: uiColors.text,
     fontSize: 14,
     fontWeight: "600",
+  },
+  hint: {
+    color: uiColors.muted,
+    fontSize: 13,
   },
   roleOptions: {
     flexDirection: "row",

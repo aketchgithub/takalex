@@ -8,8 +8,14 @@ CREATE TYPE public.access_status AS ENUM (
 
 -- PUBLIC ACCESS REQUESTS
 -- Anonymous visitors may only supply: full_name, email, phone, role,
--- site_name and referral_source (see column grants below). Validation is
+-- site_id and referral_source (see column grants below). Validation is
 -- deliberately permissive so legitimate Kenyan numbers and addresses pass.
+--
+-- Waste pickers (collectors) join through an access request in which they
+-- choose their group, which is their site (confirmed with Chemolex, 7 Nov).
+-- An admin approves it and an invitation is created. So site_id is required
+-- for collectors and optional for site managers and recyclers; whenever it
+-- is given it must be an active site (public_submit_access_requests).
 CREATE TABLE public.access_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL
@@ -34,10 +40,7 @@ CREATE TABLE public.access_requests (
       )
     ),
   role public.user_role NOT NULL DEFAULT 'collector',
-  site_name TEXT
-    CONSTRAINT access_request_site_name_length CHECK (
-      site_name IS NULL OR length(trim(site_name)) BETWEEN 1 AND 120
-    ),
+  site_id UUID REFERENCES public.sites(id),
   referral_source TEXT
     CONSTRAINT access_request_referral_source_length CHECK (
       referral_source IS NULL
@@ -55,12 +58,39 @@ CREATE TABLE public.access_requests (
       OR NULLIF(trim(phone), '') IS NOT NULL
     ),
   CONSTRAINT access_request_no_admin_role
-    CHECK (role <> 'admin'::public.user_role)
+    CHECK (role <> 'admin'::public.user_role),
+  -- A collector's site is their group, so they must choose one. (Whether
+  -- the site is active is checked by the insert policy.)
+  CONSTRAINT access_request_collector_site_required
+    CHECK (role <> 'collector'::public.user_role OR site_id IS NOT NULL)
 );
 
 REVOKE ALL ON public.access_requests FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE INDEX access_requests_status_idx ON public.access_requests(status);
+
+-- SITE OPTIONS FOR THE PUBLIC REQUEST FORM
+-- Returns only the id and name of active sites, ordered by name. anon has
+-- no privilege on public.sites itself (and gets none); this narrow
+-- SECURITY DEFINER function is the only way the public form, and the
+-- access-request insert policy below, can see which sites are active.
+CREATE OR REPLACE FUNCTION public.public_site_options()
+RETURNS TABLE (id UUID, name TEXT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT s.id, s.name
+  FROM public.sites AS s
+  WHERE s.active
+  ORDER BY s.name;
+$$;
+
+REVOKE ALL ON FUNCTION public.public_site_options()
+  FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.public_site_options()
+  TO anon, authenticated;
 
 -- ADMIN-CREATED INVITATIONS
 --
@@ -156,6 +186,10 @@ CREATE UNIQUE INDEX invitations_one_pending_email_idx
 ALTER TABLE public.access_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invitations ENABLE ROW LEVEL SECURITY;
 
+-- Collectors must choose an active site (their group). Site managers and
+-- recyclers may leave it empty, but a site they do choose must be active.
+-- The site check goes through public_site_options(), so anon needs no
+-- privilege on public.sites.
 CREATE POLICY public_submit_access_requests
   ON public.access_requests
   FOR INSERT TO anon, authenticated
@@ -165,6 +199,17 @@ CREATE POLICY public_submit_access_requests
     AND reviewed_at IS NULL
     AND notes IS NULL
     AND role <> 'admin'::public.user_role
+    AND (
+      (site_id IS NULL AND role <> 'collector'::public.user_role)
+      OR (
+        site_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.public_site_options() AS o
+          WHERE o.id = site_id
+        )
+      )
+    )
   );
 
 -- Row access for active admins. What they can actually do is limited by the
@@ -221,7 +266,7 @@ GRANT INSERT (
   email,
   phone,
   role,
-  site_name,
+  site_id,
   referral_source
 ) ON public.access_requests TO anon, authenticated;
 
@@ -243,7 +288,7 @@ GRANT SELECT (
   email,
   phone,
   role,
-  site_name,
+  site_id,
   status
 ) ON public.access_requests TO service_role;
 GRANT UPDATE (status) ON public.access_requests TO service_role;
@@ -320,12 +365,15 @@ BEGIN
     RAISE EXCEPTION 'A full name is required';
   END IF;
 
-  -- Collectors and site managers need at least one site; recyclers may have
-  -- none (NULL is treated as none for them).
+  -- A collector's site is their group, so collectors need exactly one
+  -- site. Site managers need at least one; recyclers may have none (NULL is
+  -- treated as none for them).
   IF p_role = 'recycler'::public.user_role THEN
     p_site_ids := COALESCE(p_site_ids, '{}'::UUID[]);
   ELSIF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
     RAISE EXCEPTION 'At least one site assignment is required';
+  ELSIF p_role = 'collector'::public.user_role AND cardinality(p_site_ids) <> 1 THEN
+    RAISE EXCEPTION 'A collector must be assigned exactly one site';
   END IF;
 
   SELECT COUNT(*), COUNT(DISTINCT selected_sites.site_id)
@@ -703,12 +751,15 @@ BEGIN
     RAISE EXCEPTION 'A full name is required';
   END IF;
 
-  -- Collectors and site managers need at least one site; recyclers may have
-  -- none (NULL is treated as none for them).
+  -- A collector's site is their group, so collectors need exactly one
+  -- site. Site managers need at least one; recyclers may have none (NULL is
+  -- treated as none for them).
   IF p_role = 'recycler'::public.user_role THEN
     p_site_ids := COALESCE(p_site_ids, '{}'::UUID[]);
   ELSIF p_site_ids IS NULL OR cardinality(p_site_ids) = 0 THEN
     RAISE EXCEPTION 'At least one site assignment is required';
+  ELSIF p_role = 'collector'::public.user_role AND cardinality(p_site_ids) <> 1 THEN
+    RAISE EXCEPTION 'A collector must be assigned exactly one site';
   END IF;
 
   SELECT COUNT(*), COUNT(DISTINCT selected_sites.site_id)

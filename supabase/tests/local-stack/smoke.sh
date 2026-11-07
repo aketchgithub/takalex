@@ -8,7 +8,8 @@
 # never appear on a command line (keys reach curl through a config on stdin;
 # the DB password reaches psql through its environment). curl ignores
 # ~/.curlrc and every proxy setting. Refuses to run unless both URLs point at
-# 127.0.0.1. Deletes every row it inserted on exit, including on failure or
+# 127.0.0.1. Deletes every row it inserted (access requests with this run's
+# emails, and one temporary inactive site) on exit, including on failure or
 # Ctrl-C. Exits non-zero if any check fails.
 set -euo pipefail
 
@@ -51,8 +52,13 @@ pg() {
 
 REST="$API_URL/rest/v1"
 RUN_ID="$(date +%s)-$$-$RANDOM"
-EMAIL="smoke-$RUN_ID@example.test"           # every row this run inserts
+# Every access request this run inserts or attempts ends in -$RUN_ID@example.test.
+EMAIL="smoke-$RUN_ID@example.test"
 EMAIL_STATUS="smoke-status-$RUN_ID@example.test"
+EMAIL_NOSITE="smoke-nosite-$RUN_ID@example.test"
+EMAIL_OFFSITE="smoke-offsite-$RUN_ID@example.test"
+EMAIL_RECYCLER="smoke-recycler-$RUN_ID@example.test"
+INACTIVE_SITE="SMOKE inactive site $RUN_ID"
 BODY="$(mktemp "${TMPDIR:-/tmp}/takalex-smoke.XXXXXX")"
 FAILED=0
 
@@ -60,9 +66,11 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM HUP
   local n
-  n="$(pg -v e1="$EMAIL" -v e2="$EMAIL_STATUS" 2>&1 <<'SQL'
-WITH d AS (DELETE FROM public.access_requests WHERE email IN (:'e1', :'e2') RETURNING 1)
-SELECT count(*) FROM d;
+  n="$(pg -v run="$RUN_ID" -v site="$INACTIVE_SITE" 2>&1 <<'SQL'
+WITH d AS (DELETE FROM public.access_requests
+           WHERE email LIKE 'smoke-%' AND email LIKE '%-' || :'run' || '@example.test' RETURNING 1),
+     s AS (DELETE FROM public.sites WHERE name = :'site' RETURNING 1)
+SELECT (SELECT count(*) FROM d) + (SELECT count(*) FROM s);
 SQL
   )" || { echo "CLEANUP FAILED: $n" >&2; status=1; }
   [[ "$n" =~ ^[0-9]+$ ]] && echo "cleanup: deleted $n test row(s)"
@@ -86,7 +94,9 @@ check() {
   # -q (must be first): ignore ~/.curlrc. --noproxy '*': never send the key to a proxy.
   code="$(printf 'header = "apikey: %s"\n' "$key" |
           curl -q --noproxy '*' -K - "${args[@]}")" || code="curl-error"
-  local body; body="$(cat "$BODY")"
+  # Newlines removed: PostgREST separates array elements of a set-returning
+  # function with ",\n " and grep matches line by line.
+  local body; body="$(tr -d '\n' <"$BODY")"
   local ok=1
   [[ "$code" == "$want" ]] || ok=0
   if [[ -n "$want_body" ]] && ! grep -Eq -- "$want_body" <<<"$body"; then ok=0; fi
@@ -99,14 +109,47 @@ check() {
 }
 
 DENIED='"code":"42501"'
+UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+# An active real site (migration 005) and a temporary inactive one.
+SITE_ID="$(pg -c "SELECT id FROM public.sites WHERE active ORDER BY name LIMIT 1")"
+[[ "$SITE_ID" =~ ^$UUID_RE$ ]] || { echo "no active site found (migration 005 applied?)" >&2; exit 2; }
+OFF_SITE_ID="$(pg -v site="$INACTIVE_SITE" <<'SQL'
+WITH i AS (INSERT INTO public.sites (name, active) VALUES (:'site', false) RETURNING id)
+SELECT id FROM i;
+SQL
+)"
+[[ "$OFF_SITE_ID" =~ ^$UUID_RE$ ]] || { echo "could not create the temporary inactive site" >&2; exit 2; }
 
 echo "local stack: $API_URL"
-check "anon: insert access request (return=minimal)" "$PUB_KEY" POST access_requests 201 '^$' \
-  "{\"full_name\":\"Smoke Test\",\"email\":\"$EMAIL\",\"role\":\"collector\",\"site_name\":\"Smoke site\"}" \
+check "anon: rpc/public_site_options -> [{id,name}] only" "$PUB_KEY" POST rpc/public_site_options 200 \
+  "^\[(\{\"id\":\"$UUID_RE\",\"name\":\"[^\"]+\"\}(, *)?)+\]\$" '{}'
+if grep -qF "$INACTIVE_SITE" "$BODY" || grep -qF "$OFF_SITE_ID" "$BODY"; then
+  printf 'FAIL  %-55s\n' "public_site_options hides inactive sites"; FAILED=$((FAILED + 1))
+else
+  printf 'PASS  %-55s\n' "public_site_options hides inactive sites"
+fi
+check "anon: select sites denied" "$PUB_KEY" GET "sites?select=id" 401 "$DENIED"
+check "anon: rpc/is_evidence_object_path denied" "$PUB_KEY" POST rpc/is_evidence_object_path 401 "$DENIED" \
+  '{"p_path":"x","p_collector_id":"00000000-0000-0000-0000-000000000000","p_client_record_id":"00000000-0000-0000-0000-000000000000"}'
+check "anon: insert collector request with active site" "$PUB_KEY" POST access_requests 201 '^$' \
+  "{\"full_name\":\"Smoke Test\",\"email\":\"$EMAIL\",\"role\":\"collector\",\"site_id\":\"$SITE_ID\"}" \
+  "return=minimal"
+check "anon: collector request without site denied" "$PUB_KEY" POST access_requests 401 "$DENIED" \
+  "{\"full_name\":\"Smoke No Site\",\"email\":\"$EMAIL_NOSITE\",\"role\":\"collector\"}" \
+  "return=minimal"
+check "anon: collector request with inactive site denied" "$PUB_KEY" POST access_requests 401 "$DENIED" \
+  "{\"full_name\":\"Smoke Off Site\",\"email\":\"$EMAIL_OFFSITE\",\"role\":\"collector\",\"site_id\":\"$OFF_SITE_ID\"}" \
+  "return=minimal"
+check "anon: recycler request without site" "$PUB_KEY" POST access_requests 201 '^$' \
+  "{\"full_name\":\"Smoke Recycler\",\"email\":\"$EMAIL_RECYCLER\",\"role\":\"recycler\"}" \
+  "return=minimal"
+check "anon: insert site_name (dropped column) rejected" "$PUB_KEY" POST access_requests 400 '"code":"PGRST204"' \
+  "{\"full_name\":\"Smoke Old\",\"email\":\"$EMAIL_STATUS\",\"role\":\"recycler\",\"site_name\":\"x\"}" \
   "return=minimal"
 check "anon: select access_requests denied" "$PUB_KEY" GET "access_requests?select=id" 401 "$DENIED"
 check "anon: insert that sets status denied" "$PUB_KEY" POST access_requests 401 "$DENIED" \
-  "{\"full_name\":\"Smoke Status\",\"email\":\"$EMAIL_STATUS\",\"status\":\"approved\"}" \
+  "{\"full_name\":\"Smoke Status\",\"email\":\"$EMAIL_STATUS\",\"role\":\"recycler\",\"status\":\"approved\"}" \
   "return=minimal"
 check "anon: rpc/review_collection denied" "$PUB_KEY" POST rpc/review_collection 401 "$DENIED" \
   '{"p_collection_id":"00000000-0000-0000-0000-000000000000","p_approved":true,"p_verified_items":[{"material_code":"PET","weight_kg":1}],"p_rejection_reason":null}'
@@ -119,18 +162,22 @@ check "service_role: rpc/verify_invitation_code junk -> generic failure" "$SEC_K
   '^\[\{"is_valid":false,"invitation_id":null,"auth_user_id":null\}\]$' \
   "{\"p_email\":\"nobody-$RUN_ID@example.test\",\"p_code_hash\":\"junk\"}"
 
-# The insert must have landed exactly once, with server defaults.
-ROW="$(pg -v e1="$EMAIL" -v e2="$EMAIL_STATUS" <<'SQL'
+# The two accepted inserts landed exactly once, with server defaults and the
+# right site; none of the refused ones did.
+ROW="$(pg -v e1="$EMAIL" -v e2="$EMAIL_STATUS" -v e3="$EMAIL_NOSITE" -v e4="$EMAIL_OFFSITE" \
+          -v e5="$EMAIL_RECYCLER" -v site="$SITE_ID" <<'SQL'
 SELECT (SELECT count(*) FROM public.access_requests WHERE email = :'e1') || ' ' ||
-       COALESCE((SELECT status::text || '/' || (reviewed_by IS NULL)::text
+       COALESCE((SELECT status::text || '/' || (reviewed_by IS NULL)::text || '/' || (site_id = :'site')::text
                  FROM public.access_requests WHERE email = :'e1'), '-') || ' ' ||
-       (SELECT count(*) FROM public.access_requests WHERE email = :'e2');
+       COALESCE((SELECT (site_id IS NULL)::text FROM public.access_requests WHERE email = :'e5'), '-') || ' ' ||
+       (SELECT count(*) FROM public.access_requests WHERE email IN (:'e2', :'e3', :'e4'));
 SQL
 )"
-if [[ "$ROW" == "1 submitted/true 0" ]]; then
-  printf 'PASS  %-55s %s\n' "db: one submitted row, no status-override row" "$ROW"
+WANT="1 submitted/true/true true 0"
+if [[ "$ROW" == "$WANT" ]]; then
+  printf 'PASS  %-55s %s\n' "db: accepted rows correct, refused rows absent" "$ROW"
 else
-  printf 'FAIL  %-55s %s (expected "1 submitted/true 0")\n' "db: one submitted row, no status-override row" "$ROW"
+  printf 'FAIL  %-55s %s (expected "%s")\n' "db: accepted rows correct, refused rows absent" "$ROW" "$WANT"
   FAILED=$((FAILED + 1))
 fi
 

@@ -24,7 +24,7 @@ BEGIN
   v_u := t.mkuser('a', 'Alice@Example.test');
   v_inv := public.register_invitation(
     v_u, '  alice@example.TEST ', 'Alice A', 'collector',
-    ARRAY[t.site(1), t.site(2)], t.id('admin'), t.h('111111'));
+    ARRAY[t.site(1)], t.id('admin'), t.h('111111'));
   PERFORM t.put('inv_a', v_inv);
   r := t.inv(v_inv);
   ASSERT r.status = 'pending', 'status';
@@ -35,7 +35,7 @@ BEGIN
                           AND now() + interval '7 days', '7-day expiry';
   ASSERT r.revoked_at IS NULL AND r.revoked_by IS NULL;
   ASSERT r.superseded_by IS NULL AND r.accepted_at IS NULL;
-  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(1), t.site(2)]), 'sites';
+  ASSERT t.sites_of(v_u) = ARRAY[t.site(1)], 'sites';
   ASSERT (SELECT NOT p.is_active AND p.role = 'collector' AND p.full_name = 'Alice A'
           FROM t.profile(v_u) AS p), 'profile';
   PERFORM t.pass('register stores hash, sites, profile and a 7-day expiry');
@@ -339,7 +339,7 @@ DO $$
 DECLARE v_new UUID; r_old public.invitations; r_new public.invitations;
 BEGIN
   v_new := public.reissue_invitation(t.id('inv_e'), t.id('admin'), t.h('666666'),
-    '  Erin Renamed ', 'collector', ARRAY[t.site(6), t.site(7)]);
+    '  Erin Renamed ', 'collector', ARRAY[t.site(6)]);
   PERFORM t.put('inv_e2', v_new);
   r_old := t.inv(t.id('inv_e'));
   r_new := t.inv(v_new);
@@ -350,7 +350,7 @@ BEGIN
   ASSERT r_new.role = 'collector' AND r_new.code_hash = t.h('666666');
   ASSERT r_new.invited_by = t.id('admin');
   ASSERT r_new.expires_at > now() + interval '7 days' - interval '1 minute';
-  ASSERT t.sites_of(t.id('e')) = t.sorted(ARRAY[t.site(6), t.site(7)]), 'sites replaced';
+  ASSERT t.sites_of(t.id('e')) = ARRAY[t.site(6)], 'sites replaced';
   ASSERT (SELECT p.full_name = 'Erin Renamed' AND p.role = 'collector' AND NOT p.is_active
           FROM t.profile(t.id('e')) AS p), 'profile updated';
   ASSERT NOT (t.v('erin@example.test', '222222')->>'is_valid')::bool, 'old code fails';
@@ -440,7 +440,7 @@ BEGIN
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM = 'A full name is required', SQLERRM; END;
   BEGIN
     PERFORM public.reissue_invitation(v_inv, t.id('admin'), t.h('202020'),
-      'Fay', 'collector', ARRAY[t.site(2), t.site(2)]);
+      'Fay', 'site_manager', ARRAY[t.site(2), t.site(2)]);
     RAISE EXCEPTION 'dup sites';
   EXCEPTION WHEN raise_exception THEN ASSERT SQLERRM LIKE 'Duplicate%', SQLERRM; END;
   BEGIN
@@ -1160,12 +1160,12 @@ BEGIN
 
   PERFORM t.revoke_as(v_inv, t.id('admin'));
   v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('claim-5b'), 'Claim Five',
-    'collector', ARRAY[t.site(5), t.site(6)]);
+    'collector', ARRAY[t.site(6)]);
   ASSERT (t.v('claim5@example.test', 'claim-5b')->>'is_valid')::bool;
   v_tok := public.claim_invitation(v_new);
   ASSERT public.consume_invitation(v_new, v_tok) = v_new;
   ASSERT (SELECT p.is_active AND p.role = 'collector' FROM t.profile(v_u) AS p);
-  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(5), t.site(6)]);
+  ASSERT t.sites_of(v_u) = ARRAY[t.site(6)];
   PERFORM t.pass('failed consume after claim: claim released, profile inactive; revoke + reissue + claim + consume recovers');
 END $$;
 
@@ -1186,4 +1186,55 @@ BEGIN
     END;
   END LOOP;
   PERFORM t.pass('claim CHECK: token and expiry both or neither, and only on pending rows');
+END $$;
+
+-- S2: one site per collector (a collector's site is their group). Site
+-- managers keep one or more sites; recyclers zero or more.
+DO $$
+DECLARE v_u UUID; v_inv UUID; v_new UUID; v_bad UUID[];
+BEGIN
+  -- register: a collector with two (or three) sites is refused, nothing changes
+  FOREACH v_bad SLICE 1 IN ARRAY ARRAY[[t.site(1), t.site(2), NULL], [t.site(1), t.site(2), t.site(3)]] LOOP
+    v_bad := array_remove(v_bad, NULL);
+    v_u := t.mkuser('one_' || cardinality(v_bad), 'one-site-' || cardinality(v_bad) || '@example.test');
+    BEGIN
+      PERFORM public.register_invitation(v_u, 'one-site-' || cardinality(v_bad) || '@example.test',
+        'One Site', 'collector', v_bad, t.id('admin'), t.h('one-' || cardinality(v_bad)));
+      RAISE EXCEPTION 'collector registered with % sites', cardinality(v_bad);
+    EXCEPTION WHEN raise_exception THEN
+      ASSERT SQLERRM = 'A collector must be assigned exactly one site', SQLERRM;
+    END;
+    ASSERT t.sites_of(v_u) = '{}' AND t.inv_count(v_u) = 0, 'refused register changed state';
+    ASSERT (SELECT p.role = 'collector' AND p.full_name IS NULL FROM t.profile(v_u) AS p), 'profile changed';
+  END LOOP;
+
+  -- register: a site manager may have several sites; a recycler none or several
+  v_u := t.mkuser('one_sm', 'one-sm@example.test');
+  PERFORM public.register_invitation(v_u, 'one-sm@example.test', 'Multi Manager', 'site_manager',
+    ARRAY[t.site(1), t.site(2), t.site(3)], t.id('admin'), t.h('one-sm'));
+  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(1), t.site(2), t.site(3)]), 'manager sites';
+  v_u := t.mkuser('one_rec', 'one-rec@example.test');
+  PERFORM public.register_invitation(v_u, 'one-rec@example.test', 'Multi Recycler', 'recycler',
+    ARRAY[t.site(1), t.site(2)], t.id('admin'), t.h('one-rec'));
+  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(1), t.site(2)]), 'recycler sites';
+
+  -- reissue: changing to collector with several sites is refused; with one it works
+  v_u := t.id('one_sm');
+  v_inv := t.inv_by_hash(t.h('one-sm'));
+  PERFORM t.revoke_as(v_inv, t.id('admin'));
+  BEGIN
+    PERFORM public.reissue_invitation(v_inv, t.id('admin'), t.h('one-sm-2'), 'Now Collector',
+      'collector', ARRAY[t.site(1), t.site(2)]);
+    RAISE EXCEPTION 'collector reissued with two sites';
+  EXCEPTION WHEN raise_exception THEN
+    ASSERT SQLERRM = 'A collector must be assigned exactly one site', SQLERRM;
+  END;
+  ASSERT t.status(v_inv) = 'revoked', 'refused reissue changed the old row';
+  ASSERT t.sites_of(v_u) = t.sorted(ARRAY[t.site(1), t.site(2), t.site(3)]), 'refused reissue changed sites';
+  ASSERT (t.profile(v_u)).role = 'site_manager', 'refused reissue changed the role';
+  v_new := public.reissue_invitation(v_inv, t.id('admin'), t.h('one-sm-3'), 'Now Collector',
+    'collector', ARRAY[t.site(2)]);
+  ASSERT t.status(v_new) = 'pending' AND t.sites_of(v_u) = ARRAY[t.site(2)], 'one-site reissue';
+  ASSERT (t.profile(v_u)).role = 'collector';
+  PERFORM t.pass('collectors need exactly one site (register and reissue refuse more, changing nothing); managers may have several, recyclers none or several');
 END $$;

@@ -31,7 +31,7 @@ const nameSchema = z
   .max(120, "Full name must contain between 2 and 120 characters.");
 
 const roles: { value: InviteRole; description: string }[] = [
-  { value: "collector", description: "Records deliveries at their site." },
+  { value: "collector", description: "Records deliveries at their site (their group)." },
   { value: "site_manager", description: "Verifies and reviews deliveries for their sites." },
   { value: "recycler", description: "Sees available sorted material. No site needed." },
 ];
@@ -67,6 +67,9 @@ export default function InviteUserScreen() {
   const isInviting = useAuthStore((state) => state.isInviting);
 
   const sitesRequired = role !== "recycler";
+  // A collector's site is their group, so collectors get exactly one site
+  // (enforced by invite-user and register_invitation as well).
+  const singleSite = role === "collector";
 
   useEffect(() => {
     let isMounted = true;
@@ -111,11 +114,20 @@ export default function InviteUserScreen() {
   );
 
   function toggleSite(siteId: string) {
-    setSelectedSiteIds((current) =>
-      current.includes(siteId)
-        ? current.filter((id) => id !== siteId)
-        : [...current, siteId],
-    );
+    setSelectedSiteIds((current) => {
+      if (current.includes(siteId)) {
+        return current.filter((id) => id !== siteId);
+      }
+      return singleSite ? [siteId] : [...current, siteId];
+    });
+  }
+
+  function chooseRole(next: InviteRole) {
+    setRole(next);
+    // Switching to collector keeps at most one of the selected sites.
+    if (next === "collector") {
+      setSelectedSiteIds((current) => current.slice(0, 1));
+    }
   }
 
   async function submit() {
@@ -130,8 +142,12 @@ export default function InviteUserScreen() {
       setFormError(nameResult.error.issues[0]?.message ?? "Enter a valid name.");
       return;
     }
+    if (singleSite && selectedSiteIds.length !== 1) {
+      setFormError("Choose the collector's site (their group).");
+      return;
+    }
     if (sitesRequired && selectedSiteIds.length === 0) {
-      setFormError("Collectors and site managers must be assigned at least one site.");
+      setFormError("Site managers must be assigned at least one site.");
       return;
     }
 
@@ -229,7 +245,7 @@ export default function InviteUserScreen() {
               key={item.value}
               accessibilityRole="radio"
               accessibilityState={{ checked: selected }}
-              onPress={() => setRole(item.value)}
+              onPress={() => chooseRole(item.value)}
               style={[styles.option, selected ? styles.optionSelected : null]}
             >
               <View style={styles.optionContent}>
@@ -245,12 +261,18 @@ export default function InviteUserScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>
-          {sitesRequired ? "Assigned sites (at least one)" : "Assigned sites (optional)"}
+          {singleSite
+            ? "Site (exactly one)"
+            : sitesRequired
+              ? "Assigned sites (at least one)"
+              : "Assigned sites (optional)"}
         </Text>
         <Text style={styles.helper}>
-          {sitesRequired
-            ? "Select every site this person works at."
-            : "Recyclers do not need a site."}
+          {singleSite
+            ? "A collector's group is their site. Choose one."
+            : sitesRequired
+              ? "Select every site this person works at."
+              : "Recyclers do not need a site."}
         </Text>
 
         {isLoadingSites ? (
@@ -266,14 +288,18 @@ export default function InviteUserScreen() {
             return (
               <Pressable
                 key={site.id}
-                accessibilityRole="checkbox"
+                accessibilityRole={singleSite ? "radio" : "checkbox"}
                 accessibilityState={{ checked: selected }}
                 onPress={() => toggleSite(site.id)}
                 style={[styles.siteOption, selected ? styles.siteOptionSelected : null]}
               >
-                <View style={[styles.checkbox, selected ? styles.checkboxSelected : null]}>
-                  {selected ? <Text style={styles.checkmark}>✓</Text> : null}
-                </View>
+                {singleSite ? (
+                  <View style={[styles.radio, styles.siteRadio, selected ? styles.radioSelected : null]} />
+                ) : (
+                  <View style={[styles.checkbox, selected ? styles.checkboxSelected : null]}>
+                    {selected ? <Text style={styles.checkmark}>✓</Text> : null}
+                  </View>
+                )}
 
                 <Text style={styles.siteName}>{site.name}</Text>
               </Pressable>
@@ -346,6 +372,9 @@ const styles = StyleSheet.create({
     height: 20,
     marginLeft: 12,
     width: 20,
+  },
+  siteRadio: {
+    marginLeft: 0,
   },
   radioSelected: {
     backgroundColor: uiColors.primary,

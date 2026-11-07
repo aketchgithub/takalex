@@ -13,16 +13,22 @@ and created through the approved development process (`supabase/seed.sql`).
 
 ---
 
-## 0. Confirmed operating model (5 Nov 2026) — read first
+## 0. Confirmed operating model (5 and 7 Nov 2026) — read first
 
-Confirmed with Chemolex on 5 Nov 2026. Where this conflicts with sections 1–5 below,
-this section wins.
+Confirmed with Chemolex on 5 Nov 2026, updated 7 Nov 2026. Where this conflicts with
+sections 1–5 below, this section wins.
 
 **Collectors (waste pickers)**
 - Each collector is an individual with their own phone and email address, and their
-  own account. Collectors are members of one group (e.g. the Kiyambea women's group);
-  each group belongs to one site. Groups are shown for context; deliveries are
-  **credited to the individual collector**.
+  own account. Deliveries are **credited to the individual collector**.
+- **Confirmed 7 Nov:** each waste picker group has the same name as its site, so a
+  collector's site is their group. There is no separate groups table; the app shows
+  a collector's group as "{site name} group". A collector has exactly one site
+  (`register_invitation` and `reissue_invitation` enforce it); site managers have one
+  or more; recyclers none or more.
+- **Confirmed 7 Nov:** waste pickers join through a public access request in which
+  they choose their group (site) from the list of active sites. An admin approves the
+  request and the app creates their invitation for that site.
 - The collector records their own delivery in the app: reported material type,
   reported weight, an in-app camera photo, the device capture time and (when permission
   is granted) the device location.
@@ -50,8 +56,8 @@ this section wins.
 
 **Sites**
 - Real sites: Kariadudu, Ng'omong'o, Kiyambea, Komb Green, Mathare, Babadogo, Njiru,
-  Kariobangi. Remaining slots stay as clearly labelled TEST sites; more real sites will
-  be added later by administrators.
+  Kariobangi (migration `005_sites.sql`, location NULL). The TEST placeholder sites were
+  removed (7 Nov); more real sites will be added later by administrators.
 - Exact site coordinates are not yet known. Do not invent coordinates.
 
 **Traceability (agreed for the first version)**
@@ -87,8 +93,10 @@ this section wins.
 - Payment eligibility remains on the delivery and is credited to the individual collector.
 - `sites.location` must allow NULL until real coordinates are supplied, or real sites
   cannot be created.
-- Collector group membership: `profiles.group_id` and `sme_groups` (already exist) need
-  RLS, admin management and a site link check; collectors can belong to one group only.
+- Groups (7 Nov): `sme_groups` and `profiles.group_id` are removed, because a
+  collector's group is their site (`user_sites`). Access requests carry `site_id`
+  (required for collectors, optional for site managers and recyclers, always an active
+  site), chosen from `public_site_options()`.
 - Recycler availability: a narrow read-only function returning totals of approved
   breakdown lines by material (only materials visible to recyclers), optionally by site
   and date range, with no collector identities or photos.
@@ -100,7 +108,7 @@ recyclers do not see an "Other" category.
 **Still to confirm with Chemolex**
 1. Whether managers need an OTHER/residue line in the verified breakdown (it would never
    be shown to recyclers).
-2. Site coordinates, and the list of groups per site.
+2. Site coordinates.
 
 Role-independent work (invitations, auth, device connectivity, storage, CI) can proceed.
 
@@ -111,14 +119,16 @@ Role-independent work (invitations, auth, device connectivity, storage, CI) can 
   assignments. `register_invitation` and `consume_invitation` (and their tests) change so
   that sites are required for collector and site_manager and optional for recycler.
 - No OTHER material for now.
-- TEST sites stay in the local seed (`supabase/seed.sql`) only. The hosted project gets
-  the 8 real sites through a migration.
+- ~~TEST sites stay in the local seed (`supabase/seed.sql`) only.~~ Superseded 7 Nov:
+  the TEST sites are removed from the seed; tests use their own fixtures. The hosted
+  project gets the 8 real sites through a migration.
 - Phone OTP is dropped. The invitation code is shown to the admin once and never stored
   in plain form (only its SHA-256 hash).
 - Deletions approved: the stray `apps/package.json` and its lockfile (Phase 0), and
   `apps/mobile/src/app/auth/callback.tsx` with the deep-link and OTP paths (Phase 1).
-- Trims accepted: Phase 4 is limited to site reassignment and deactivation; groups
-  management is minimal; offline retry is retry-on-open plus a "Sync now" button.
+- Trims accepted: Phase 4 is limited to site reassignment and deactivation; offline
+  retry is retry-on-open plus a "Sync now" button. (Groups management is no longer
+  needed: groups are sites, 7 Nov.)
 
 ---
 
@@ -127,11 +137,11 @@ Role-independent work (invitations, auth, device connectivity, storage, CI) can 
 ### 1.1 Administrator
 - Sign in securely and view the administration dashboard.
 - View registered users and their roles.
-- Invite new users, assign roles, assign collectors to a group (and so a site) and
-  site managers to one or more sites.
-- View and manage collection sites (eight real sites plus labelled TEST sites; more
-  sites added later) and the groups at each site.
-- View, approve or reject access requests.
+- Invite new users, assign roles, assign each collector exactly one site (which is
+  their group) and site managers to one or more sites.
+- View and manage collection sites (the eight real sites; more sites added later).
+- View, approve or reject access requests. Approving a waste picker's request creates
+  their invitation for the site (group) they chose.
 - View invitations and their statuses; revoke and reissue invitations.
 - View collection activity and approval history across the platform.
 - The administrator must not be able to bypass database security rules through the app.
@@ -151,7 +161,7 @@ Never expose invitation code hashes or service-role credentials to the mobile ap
 
 ### 1.2 Collector / Waste Picker — highest priority
 - Accept an invitation, activate the account, sign in.
-- See their group and site.
+- See their site, shown as their group ("{site name} group").
 - Start a new submission: select the reported material type, enter reported weight
   in kg, capture a photo with the device camera inside the app, preview, retake, submit.
   The device location is attached when permission is granted.
@@ -256,7 +266,7 @@ list remaining issues, stop for review.
 - **Phase 3 — Site Manager:** pending queue, signed-URL evidence viewing, verified
   breakdown entry, approve/reject, review history.
 - **Phase 4 — Administrator:** user management RPCs and screens, invitations list,
-  site and group assignments, access requests, collection overview.
+  site assignments, access requests, collection overview.
 - **Phase 5 — Recycler:** availability aggregates, site/material filters, read-only enforcement.
 - **Phase 6 — Integration and testing:** full four-role journey, unauthorized access,
   wrong-site assignments, failed uploads/network errors, invitation failures and expiry,

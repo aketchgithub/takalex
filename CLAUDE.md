@@ -31,7 +31,7 @@ The demo brief and confirmed operating model are in docs/demo-plan.md; read it b
 ## Product rules the database must enforce (not just the UI)
 - Roles: collector, site_manager, recycler, admin. RLS on every table; explicit GRANTs
   are needed because automatic table exposure is disabled on the project.
-- Users can be assigned to multiple sites via `user_sites` (admin-managed). 9 sites at launch, more later.
+- Users can be assigned to multiple sites via `user_sites` (admin-managed). 8 real sites (see migration 005); admins add more later.
 - Materials are rows in the `materials` lookup table (not an enum or hardcoded list), with
   `is_reportable`, `is_verifiable`, `is_recycler_visible` and `is_active` flags, so types can be
   added later. PET, PP, HDPE, LDPE and PLASTIC_BAGS are reportable, verifiable and

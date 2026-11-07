@@ -22,7 +22,6 @@ export const profileSchema = z.object({
   full_name: z.string().nullable(),
   phone: z.string().nullable(),
   role: userRoleSchema,
-  group_id: z.string().uuid().nullable(),
   is_active: z.boolean(),
   created_at: z.string(),
 });

@@ -21,7 +21,7 @@ export default function HowItWorksScreen() {
         4. The invited user verifies their account and enters the protected collector or admin workspace.
       </Message>
       <Message>
-        5. Only approved, invited users can log collections, manage groups, or view operational data.
+        5. Only approved, invited users can log collections, manage sites, or view operational data.
       </Message>
       <PrimaryButton label="Request access" onPress={() => router.push("/request-access" as any)} />
       <PrimaryButton label="View public home" onPress={() => router.replace("/" as any)} />

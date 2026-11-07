@@ -1,5 +1,8 @@
--- ACCESS REQUESTS: public submission, column grants, validation, admin
--- review permissions and the reviewer trigger (migration 003).
+-- ACCESS REQUESTS: public submission, column grants, validation, site
+-- rules and public_site_options(), admin review permissions and the
+-- reviewer trigger (migration 003). Requests that are not about the site
+-- rules use fixture site 1, because collectors (the default role) must
+-- choose an active site.
 SET client_min_messages = notice;
 
 DO $$ BEGIN
@@ -17,15 +20,15 @@ DECLARE r public.access_requests;
 BEGIN
   PERFORM t.become('anon');
   INSERT INTO public.access_requests
-    (full_name, email, phone, role, site_name, referral_source)
+    (full_name, email, phone, role, site_id, referral_source)
   VALUES ('Jane Wanjiru', 'jane@example.test', '+254 712 345-678',
-          'site_manager', 'Site A', 'A friend');
+          'site_manager', t.site(1), 'A friend');
   PERFORM t.become('postgres');
   SELECT * INTO STRICT r FROM public.access_requests WHERE email = 'jane@example.test';
   ASSERT r.status = 'submitted', 'status';
   ASSERT r.reviewed_by IS NULL AND r.reviewed_at IS NULL AND r.notes IS NULL;
   ASSERT r.created_at IS NOT NULL AND r.id IS NOT NULL;
-  ASSERT r.role = 'site_manager';
+  ASSERT r.role = 'site_manager' AND r.site_id = t.site(1);
   PERFORM t.pass('anon can submit with the six allowed columns; status defaults to submitted');
 END $$;
 
@@ -43,8 +46,8 @@ BEGIN
     BEGIN
       PERFORM t.become('anon');
       EXECUTE format(
-        'INSERT INTO public.access_requests (full_name, email, %I) VALUES (''X Y'', ''xy@example.test'', %s)',
-        c, v);
+        'INSERT INTO public.access_requests (full_name, email, site_id, %I) VALUES (''X Y'', ''xy@example.test'', %L, %s)',
+        c, t.site(1), v);
       RAISE EXCEPTION 'anon could set %', c;
     EXCEPTION WHEN insufficient_privilege THEN NULL;
     END;
@@ -84,13 +87,13 @@ DECLARE
 BEGIN
   FOREACH x IN ARRAY ok_phones LOOP
     PERFORM t.become('anon');
-    INSERT INTO public.access_requests (full_name, phone) VALUES ('Phone Ok', x);
+    INSERT INTO public.access_requests (full_name, phone, site_id) VALUES ('Phone Ok', x, t.site(1));
     n := n + 1;
   END LOOP;
   FOREACH x IN ARRAY bad_phones LOOP
     BEGIN
       PERFORM t.become('anon');
-      INSERT INTO public.access_requests (full_name, phone) VALUES ('Phone Bad', x);
+      INSERT INTO public.access_requests (full_name, phone, site_id) VALUES ('Phone Bad', x, t.site(1));
       RAISE EXCEPTION 'bad phone accepted: %', x;
     EXCEPTION WHEN check_violation THEN NULL;
     END;
@@ -98,26 +101,26 @@ BEGIN
   FOREACH x IN ARRAY bad_emails LOOP
     BEGIN
       PERFORM t.become('anon');
-      INSERT INTO public.access_requests (full_name, email) VALUES ('Email Bad', x);
+      INSERT INTO public.access_requests (full_name, email, site_id) VALUES ('Email Bad', x, t.site(1));
       RAISE EXCEPTION 'bad email accepted: %', x;
     EXCEPTION WHEN check_violation THEN NULL;
     END;
   END LOOP;
   BEGIN
     PERFORM t.become('anon');
-    INSERT INTO public.access_requests (full_name) VALUES ('No Contact');
+    INSERT INTO public.access_requests (full_name, site_id) VALUES ('No Contact', t.site(1));
     RAISE EXCEPTION 'no contact accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
   BEGIN
     PERFORM t.become('anon');
-    INSERT INTO public.access_requests (full_name, phone, email) VALUES ('Blank Contact', '  ', NULL);
+    INSERT INTO public.access_requests (full_name, phone, email, site_id) VALUES ('Blank Contact', '  ', NULL, t.site(1));
     RAISE EXCEPTION 'blank contact accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
   BEGIN
     PERFORM t.become('anon');
-    INSERT INTO public.access_requests (full_name, email) VALUES ('A', 'short@example.test');
+    INSERT INTO public.access_requests (full_name, email, site_id) VALUES ('A', 'short@example.test', t.site(1));
     RAISE EXCEPTION 'one-letter name accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
@@ -199,7 +202,7 @@ BEGIN
   ASSERT r.reviewed_at IS NOT NULL, 'reviewed_at';
   PERFORM t.put('jane', r.id);
 
-  FOREACH c IN ARRAY ARRAY['full_name', 'email', 'phone', 'role', 'site_name',
+  FOREACH c IN ARRAY ARRAY['full_name', 'email', 'phone', 'role', 'site_id',
                            'referral_source', 'reviewed_by', 'reviewed_at', 'created_at', 'id'] LOOP
     BEGIN
       PERFORM t.become('authenticated', t.id('admin'));
@@ -278,11 +281,11 @@ DECLARE n BIGINT; v_id UUID;
 BEGIN
   PERFORM t.become('anon');
   INSERT INTO public.access_requests
-    (full_name, email, phone, role, site_name, referral_source)
-  VALUES ('No Readback', 'noreadback@example.test', '0712345678', 'recycler', 'Site B', 'Radio');
+    (full_name, email, phone, role, site_id, referral_source)
+  VALUES ('No Readback', 'noreadback@example.test', '0712345678', 'recycler', t.site(2), 'Radio');
   BEGIN
-    INSERT INTO public.access_requests (full_name, email)
-    VALUES ('Read Back', 'readback@example.test') RETURNING id INTO v_id;
+    INSERT INTO public.access_requests (full_name, email, site_id)
+    VALUES ('Read Back', 'readback@example.test', t.site(1)) RETURNING id INTO v_id;
     RAISE EXCEPTION 'anon could read the inserted row back';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
@@ -293,7 +296,7 @@ BEGIN
   END;
   PERFORM t.become('postgres');
   ASSERT EXISTS (SELECT 1 FROM public.access_requests WHERE email = 'noreadback@example.test'
-                 AND role = 'recycler' AND site_name = 'Site B' AND referral_source = 'Radio');
+                 AND role = 'recycler' AND site_id = t.site(2) AND referral_source = 'Radio');
   ASSERT NOT EXISTS (SELECT 1 FROM public.access_requests WHERE email = 'readback@example.test');
   PERFORM t.pass('anon inserts all 6 columns without RETURNING; RETURNING and SELECT are denied (0 rows readable)');
 END $$;
@@ -304,48 +307,47 @@ DECLARE
   v_email_254 TEXT := repeat('a', 254 - length('@example.test')) || '@example.test';
   v_ok TEXT[][] := ARRAY[
     ['full_name', repeat('n', 2)], ['full_name', repeat('n', 150)],
-    ['site_name', repeat('s', 120)], ['referral_source', repeat('r', 200)]];
+    ['referral_source', repeat('r', 200)]];
   v_bad TEXT[][] := ARRAY[
     ['full_name', 'n'], ['full_name', '  n  '], ['full_name', repeat('n', 151)],
-    ['site_name', repeat('s', 121)], ['site_name', ''], ['site_name', '   '],
     ['referral_source', repeat('r', 201)], ['referral_source', ''], ['referral_source', '  ']];
   i INTEGER;
 BEGIN
   FOR i IN 1 .. array_length(v_ok, 1) LOOP
     PERFORM t.become('anon');
     IF v_ok[i][1] = 'full_name' THEN
-      EXECUTE 'INSERT INTO public.access_requests (full_name, email) VALUES ($1, ''len-ok@example.test'')'
-        USING v_ok[i][2];
+      EXECUTE 'INSERT INTO public.access_requests (full_name, email, site_id) VALUES ($1, ''len-ok@example.test'', $2)'
+        USING v_ok[i][2], t.site(1);
     ELSE
-      EXECUTE format('INSERT INTO public.access_requests (full_name, email, %I) VALUES (''Len Ok'', ''len-ok@example.test'', $1)',
-                     v_ok[i][1]) USING v_ok[i][2];
+      EXECUTE format('INSERT INTO public.access_requests (full_name, email, site_id, %I) VALUES (''Len Ok'', ''len-ok@example.test'', $2, $1)',
+                     v_ok[i][1]) USING v_ok[i][2], t.site(1);
     END IF;
   END LOOP;
   FOR i IN 1 .. array_length(v_bad, 1) LOOP
     BEGIN
       PERFORM t.become('anon');
       IF v_bad[i][1] = 'full_name' THEN
-        EXECUTE 'INSERT INTO public.access_requests (full_name, email) VALUES ($1, ''len-bad@example.test'')'
-          USING v_bad[i][2];
+        EXECUTE 'INSERT INTO public.access_requests (full_name, email, site_id) VALUES ($1, ''len-bad@example.test'', $2)'
+          USING v_bad[i][2], t.site(1);
       ELSE
-        EXECUTE format('INSERT INTO public.access_requests (full_name, email, %I) VALUES (''Len Bad'', ''len-bad@example.test'', $1)',
-                       v_bad[i][1]) USING v_bad[i][2];
+        EXECUTE format('INSERT INTO public.access_requests (full_name, email, site_id, %I) VALUES (''Len Bad'', ''len-bad@example.test'', $2, $1)',
+                       v_bad[i][1]) USING v_bad[i][2], t.site(1);
       END IF;
       RAISE EXCEPTION '% of length % accepted', v_bad[i][1], length(v_bad[i][2]);
     EXCEPTION WHEN check_violation THEN NULL;
     END;
   END LOOP;
   PERFORM t.become('anon');
-  INSERT INTO public.access_requests (full_name, email) VALUES ('Long Email', v_email_254);
+  INSERT INTO public.access_requests (full_name, email, site_id) VALUES ('Long Email', v_email_254, t.site(1));
   BEGIN
-    INSERT INTO public.access_requests (full_name, email) VALUES ('Long Email', 'a' || v_email_254);
+    INSERT INTO public.access_requests (full_name, email, site_id) VALUES ('Long Email', 'a' || v_email_254, t.site(1));
     RAISE EXCEPTION '255-character email accepted';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
   PERFORM t.become('postgres');
-  ASSERT (SELECT count(*) FROM public.access_requests WHERE email = 'len-ok@example.test') = 4;
+  ASSERT (SELECT count(*) FROM public.access_requests WHERE email = 'len-ok@example.test') = 3;
   ASSERT NOT EXISTS (SELECT 1 FROM public.access_requests WHERE email = 'len-bad@example.test');
-  PERFORM t.pass('length CHECKs: name 2-150 (trimmed), site_name 1-120, referral_source 1-200, email <= 254');
+  PERFORM t.pass('length CHECKs: name 2-150 (trimmed), referral_source 1-200, email <= 254');
 END $$;
 
 -- 13: phone parity with apps/mobile/src/lib/access.ts
@@ -363,7 +365,7 @@ BEGIN
   FOREACH x IN ARRAY v_accept LOOP
     BEGIN
       PERFORM t.become('anon');
-      INSERT INTO public.access_requests (full_name, phone) VALUES ('Parity Ok', x);
+      INSERT INTO public.access_requests (full_name, phone, site_id) VALUES ('Parity Ok', x, t.site(1));
     EXCEPTION WHEN check_violation THEN
       RAISE EXCEPTION 'valid phone rejected: "%"', x;
     END;
@@ -371,7 +373,7 @@ BEGIN
   FOREACH x IN ARRAY v_reject LOOP
     BEGIN
       PERFORM t.become('anon');
-      INSERT INTO public.access_requests (full_name, phone) VALUES ('Parity Bad', x);
+      INSERT INTO public.access_requests (full_name, phone, site_id) VALUES ('Parity Bad', x, t.site(1));
       RAISE EXCEPTION 'invalid phone accepted: "%"', x;
     EXCEPTION WHEN check_violation THEN NULL;
     END;
@@ -417,7 +419,7 @@ DECLARE v_before JSONB; c TEXT; v TEXT;
 BEGIN
   SELECT to_jsonb(a) INTO v_before FROM public.access_requests a WHERE id = t.id('noreadback');
   FOREACH c IN ARRAY ARRAY['reviewed_by', 'reviewed_at', 'full_name', 'email', 'phone',
-                           'role', 'created_at', 'id'] LOOP
+                           'role', 'site_id', 'created_at', 'id'] LOOP
     v := CASE c
       WHEN 'reviewed_by' THEN quote_literal(t.id('collector'))
       WHEN 'reviewed_at' THEN '''2000-01-01'''
@@ -425,6 +427,7 @@ BEGIN
       WHEN 'email' THEN '''hacked@example.test'''
       WHEN 'phone' THEN '''0799999999'''
       WHEN 'role' THEN '''site_manager'''
+      WHEN 'site_id' THEN quote_literal(t.site(3))
       WHEN 'created_at' THEN '''2000-01-01'''
       ELSE 'gen_random_uuid()' END;
     BEGIN
@@ -436,7 +439,7 @@ BEGIN
   END LOOP;
   ASSERT (SELECT to_jsonb(a) FROM public.access_requests a WHERE id = t.id('noreadback')) = v_before,
     'row changed after denied updates';
-  PERFORM t.pass('admin cannot set reviewer fields, identity, contact, role, created_at or id; row unchanged');
+  PERFORM t.pass('admin cannot set reviewer fields, identity, contact, role, site, created_at or id; row unchanged');
 END $$;
 
 -- 17 (service_role has UPDATE on status only, so forged reviewer values
@@ -520,7 +523,7 @@ END $$;
 DO $$
 DECLARE
   col TEXT;
-  v_insert TEXT[] := ARRAY['full_name', 'email', 'phone', 'role', 'site_name', 'referral_source'];
+  v_insert TEXT[] := ARRAY['full_name', 'email', 'phone', 'role', 'site_id', 'referral_source'];
   v_update TEXT[] := ARRAY['status', 'notes'];
   v_qual TEXT; v_check TEXT;
   tg RECORD;
@@ -556,4 +559,127 @@ BEGIN
   ASSERT (tg.tgtype & 16) = 16, 'not ON UPDATE';
   ASSERT (tg.tgtype & (4 | 8 | 32)) = 0, 'also fires on INSERT/DELETE/TRUNCATE';
   PERFORM t.pass('catalog: exact column grants, (SELECT is_active_admin()) in USING and WITH CHECK, single BEFORE UPDATE row trigger');
+END $$;
+
+-- ============================================================ S2: site rules and site options
+DO $$ BEGIN
+  INSERT INTO public.sites (name, active) VALUES ('FIXTURE Inactive Site', false);
+  PERFORM t.put('site_off', (SELECT id FROM public.sites WHERE name = 'FIXTURE Inactive Site'));
+END $$;
+
+-- 21: collectors must choose an active site (their group)
+DO $$
+DECLARE v_bad UUID; r TEXT;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    FOREACH v_bad IN ARRAY ARRAY[NULL, t.id('site_off'), gen_random_uuid()] LOOP
+      BEGIN
+        PERFORM t.become(r, CASE WHEN r = 'authenticated' THEN t.id('collector') END);
+        INSERT INTO public.access_requests (full_name, email, role, site_id)
+        VALUES ('Site Rule', 'site-rule@example.test', 'collector', v_bad);
+        RAISE EXCEPTION '% collector request accepted with site %', r, COALESCE(v_bad::text, 'NULL');
+      EXCEPTION WHEN insufficient_privilege THEN NULL;
+      END;
+    END LOOP;
+    -- role omitted: the default is collector, so a site is still required
+    BEGIN
+      PERFORM t.become(r, CASE WHEN r = 'authenticated' THEN t.id('collector') END);
+      INSERT INTO public.access_requests (full_name, email) VALUES ('Site Rule', 'site-rule@example.test');
+      RAISE EXCEPTION '% default-role request accepted without a site', r;
+    EXCEPTION WHEN insufficient_privilege THEN NULL;
+    END;
+  END LOOP;
+  PERFORM t.become('anon');
+  INSERT INTO public.access_requests (full_name, email, role, site_id)
+  VALUES ('Site Rule Ok', 'site-rule-ok@example.test', 'collector', t.site(4));
+  PERFORM t.become('postgres');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.access_requests WHERE email = 'site-rule@example.test');
+  ASSERT (SELECT site_id FROM public.access_requests WHERE email = 'site-rule-ok@example.test') = t.site(4);
+  -- the table constraint holds even for the owner (no RLS)
+  BEGIN
+    INSERT INTO public.access_requests (full_name, email, role) VALUES ('Owner', 'owner@example.test', 'collector');
+    RAISE EXCEPTION 'owner inserted a collector request without a site';
+  EXCEPTION WHEN check_violation THEN
+    ASSERT SQLERRM LIKE '%access_request_collector_site_required%', SQLERRM;
+  END;
+  PERFORM t.pass('collector requests: missing, inactive and unknown sites refused (anon and authenticated); an active site is accepted; CHECK holds for the owner');
+END $$;
+
+-- 22: site managers and recyclers: site optional, but an active one if given
+DO $$
+DECLARE v_role TEXT; v_bad UUID;
+BEGIN
+  FOREACH v_role IN ARRAY ARRAY['site_manager', 'recycler'] LOOP
+    PERFORM t.become('anon');
+    EXECUTE 'INSERT INTO public.access_requests (full_name, email, role) VALUES ($1, $2, $3::public.user_role)'
+      USING 'Optional Site', 'opt-none-' || v_role || '@example.test', v_role;
+    EXECUTE 'INSERT INTO public.access_requests (full_name, email, role, site_id) VALUES ($1, $2, $3::public.user_role, $4)'
+      USING 'Optional Site', 'opt-site-' || v_role || '@example.test', v_role, t.site(5);
+    FOREACH v_bad IN ARRAY ARRAY[t.id('site_off'), gen_random_uuid()] LOOP
+      BEGIN
+        EXECUTE 'INSERT INTO public.access_requests (full_name, email, role, site_id) VALUES ($1, $2, $3::public.user_role, $4)'
+          USING 'Optional Site', 'opt-bad@example.test', v_role, v_bad;
+        RAISE EXCEPTION '% request accepted with bad site %', v_role, v_bad;
+      EXCEPTION WHEN insufficient_privilege THEN NULL;
+      END;
+    END LOOP;
+  END LOOP;
+  PERFORM t.become('postgres');
+  ASSERT (SELECT count(*) FROM public.access_requests WHERE email LIKE 'opt-none-%' AND site_id IS NULL) = 2;
+  ASSERT (SELECT count(*) FROM public.access_requests WHERE email LIKE 'opt-site-%' AND site_id = t.site(5)) = 2;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.access_requests WHERE email = 'opt-bad@example.test');
+  PERFORM t.pass('site manager and recycler requests: no site or an active site accepted; inactive or unknown site refused');
+END $$;
+
+-- 23: public_site_options returns exactly id and name of active sites, by name
+DO $$
+DECLARE v_got JSONB; v_want JSONB; r TEXT;
+  f REGPROCEDURE := 'public.public_site_options()'::regprocedure;
+BEGIN
+  SELECT jsonb_agg(jsonb_build_object('id', id, 'name', name) ORDER BY name) INTO v_want
+  FROM public.sites WHERE active;
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    PERFORM t.become(r, CASE WHEN r = 'authenticated' THEN t.id('collector') END);
+    SELECT jsonb_agg(to_jsonb(o)) INTO v_got FROM public.public_site_options() AS o;
+    PERFORM t.become('postgres');
+    ASSERT v_got = v_want, r || ' got ' || v_got;
+  END LOOP;
+  ASSERT NOT (v_got @> jsonb_build_array(jsonb_build_object('id', t.id('site_off')))), 'inactive site listed';
+  ASSERT (SELECT bool_and(o ?& ARRAY['id', 'name'] AND (SELECT count(*) FROM jsonb_object_keys(o)) = 2)
+          FROM jsonb_array_elements(v_got) AS e(o)), 'extra columns returned';
+  ASSERT pg_get_function_result(f) = 'TABLE(id uuid, name text)', pg_get_function_result(f);
+  ASSERT (SELECT prosecdef AND provolatile = 's' FROM pg_proc WHERE oid = f), 'not STABLE SECURITY DEFINER';
+  ASSERT has_function_privilege('anon', f, 'EXECUTE') AND has_function_privilege('authenticated', f, 'EXECUTE');
+  ASSERT NOT has_function_privilege('service_role', f, 'EXECUTE') AND NOT has_function_privilege('public', f, 'EXECUTE');
+  -- anon still has nothing at all on public.sites
+  ASSERT NOT has_table_privilege('anon', 'public.sites', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER');
+  ASSERT NOT has_any_column_privilege('anon', 'public.sites', 'SELECT,INSERT,UPDATE,REFERENCES');
+  BEGIN
+    PERFORM t.become('anon');
+    PERFORM 1 FROM public.sites;
+    RAISE EXCEPTION 'anon read sites';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM t.pass('public_site_options: exactly id and name of active sites by name, for anon and authenticated only; anon has no privilege on sites');
+END $$;
+
+-- 24: the insert policy uses public_site_options and no other function
+DO $$
+DECLARE v_funcs TEXT;
+BEGIN
+  SELECT string_agg(d.refobjid::regprocedure::text, ', ' ORDER BY d.refobjid::regprocedure::text) INTO v_funcs
+  FROM pg_policy pol
+  JOIN pg_depend d ON d.classid = 'pg_policy'::regclass AND d.objid = pol.oid
+                  AND d.refclassid = 'pg_proc'::regclass
+  WHERE pol.polrelid = 'public.access_requests'::regclass
+    AND pol.polname = 'public_submit_access_requests';
+  ASSERT v_funcs = 'public_site_options()', 'policy depends on: ' || COALESCE(v_funcs, '<none>');
+  ASSERT (SELECT confrelid = 'public.sites'::regclass FROM pg_constraint
+          WHERE conrelid = 'public.access_requests'::regclass AND contype = 'f'
+            AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                                WHERE attrelid = 'public.access_requests'::regclass AND attname = 'site_id')]),
+    'site_id is not a foreign key to sites';
+  ASSERT NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.access_requests'::regclass
+                     AND attname = 'site_name' AND NOT attisdropped), 'site_name still exists';
+  PERFORM t.pass('catalog: insert policy depends only on public_site_options(); site_id references sites; site_name is gone');
 END $$;
