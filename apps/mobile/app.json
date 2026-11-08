@@ -25,7 +25,26 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "@sentry/react-native"
+      "@sentry/react-native",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Takalex uses the camera to photograph each waste delivery as evidence for your site manager.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Takalex records your location when you log a delivery, so your site manager can see where it was recorded. You can decline and still log deliveries.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

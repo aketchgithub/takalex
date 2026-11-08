@@ -1,8 +1,11 @@
 import { Tabs } from "expo-router";
 
 import { RoleGate } from "@/components/RoleGate";
+import { useOutboxSync } from "@/lib/outbox/useOutboxSync";
 
 export default function CollectorLayout() {
+  useOutboxSync();
+
   return (
     <RoleGate role="collector">
       <Tabs screenOptions={{ headerShown: true }}>

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   mobile:
-    name: Mobile typecheck and lint
+    name: Mobile typecheck, lint and unit tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -27,6 +27,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run test:unit
 
   sql-tests:
     name: SQL tests (throwaway PostgreSQL)
