@@ -24,6 +24,10 @@ export class PermanentSyncError extends Error {
   }
 }
 
+// Prefix of every RLS / privilege reason (see classifyError). Exported so
+// the history screen can recognise these failures without its own literal.
+export const NOT_ALLOWED_REASON = "Not allowed by the server";
+
 const NETWORK_PATTERN =
   /network request failed|failed to fetch|fetcherror|network ?error|timed? ?out|timeout|aborted|econn|enotfound|eai_again|socket hang up/i;
 
@@ -118,7 +122,7 @@ export function classifyError(raw: unknown): ClassifiedError {
   if (code === "42501" || status === 403) {
     return {
       kind: "permanent",
-      reason: `Not allowed by the server: ${detail}`,
+      reason: `${NOT_ALLOWED_REASON}: ${detail}`,
     };
   }
 

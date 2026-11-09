@@ -30,7 +30,8 @@ import type {
 } from "./types.ts";
 import { evidenceStoragePath } from "./validation.ts";
 
-const STEP_LABEL: Record<Exclude<SyncStep, "done">, string> = {
+// Every stored reason starts with "<label>: ". Exported for presentation.ts.
+export const STEP_LABEL: Record<Exclude<SyncStep, "done">, string> = {
   record: "Sending the delivery",
   photo: "Uploading the photo",
   evidence: "Attaching the photo",

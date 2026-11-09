@@ -10,7 +10,7 @@ export default function CollectorLayout() {
     <RoleGate role="collector">
       <Tabs screenOptions={{ headerShown: true }}>
         <Tabs.Screen name="index" options={{ title: "Home" }} />
-        <Tabs.Screen name="log" options={{ title: "Log waste" }} />
+        <Tabs.Screen name="log" options={{ title: "New delivery" }} />
         <Tabs.Screen name="history" options={{ title: "History" }} />
       </Tabs>
     </RoleGate>

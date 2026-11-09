@@ -68,6 +68,28 @@ export async function storeOutboxPhoto(sourceUri: string, photoUuid: string): Pr
   return `${OUTBOX_DIRECTORY}/${name}`;
 }
 
+// Names of the files directly in the outbox directory (empty if it does not
+// exist yet).
+export function listOutboxPhotoNames(): string[] {
+  const directory = new Directory(Paths.document, OUTBOX_DIRECTORY);
+  if (!directory.exists) return [];
+  return directory
+    .list()
+    .filter((entry): entry is File => entry instanceof File)
+    .map((file) => file.name);
+}
+
+// Best effort: removes a camera capture from the cache once it has been
+// processed into the outbox, or when the collector retakes it.
+export function deleteTemporaryPhoto(uri: string): void {
+  try {
+    const file = new File(uri);
+    if (file.exists) file.delete();
+  } catch {
+    // The OS clears the cache eventually.
+  }
+}
+
 function resolve(relativePath: string): File {
   if (!/^outbox\/[0-9a-f-]+\.jpg$/.test(relativePath)) {
     throw new Error("Unexpected outbox photo path.");

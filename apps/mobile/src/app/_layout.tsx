@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import { Stack } from "expo-router";
 import * as Sentry from "@sentry/react-native";
 
+import { cleanupOutboxPhotos } from "@/lib/outbox";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -11,6 +13,12 @@ Sentry.init({
 
 export default function RootLayout() {
   const isHydrated = useAuthStore((state) => state.isHydrated);
+
+  // Once per app start, whoever signs in: remove outbox photos that no row
+  // references. Native only (the outbox is not used on web).
+  useEffect(() => {
+    if (Platform.OS !== "web") void cleanupOutboxPhotos();
+  }, []);
 
   useEffect(() => {
     if (!isHydrated) {

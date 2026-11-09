@@ -93,14 +93,54 @@ export function PrimaryButton({
   );
 }
 
+export function SecondaryButton({
+  disabled = false,
+  label,
+  loading = false,
+  onPress,
+  tone = "default",
+}: {
+  disabled?: boolean;
+  label: string;
+  loading?: boolean;
+  onPress: () => void;
+  tone?: "default" | "danger";
+}) {
+  const color = tone === "danger" ? colors.danger : colors.primary;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      disabled={disabled || loading}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.secondaryButton,
+        { borderColor: color },
+        pressed && !disabled && !loading ? styles.buttonPressed : null,
+        disabled || loading ? styles.buttonDisabled : null,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={color} />
+      ) : (
+        <Text style={[styles.secondaryButtonText, { color }]}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
+
 export function Message({
   children,
   tone = "info",
-}: PropsWithChildren<{ tone?: "error" | "info" }>) {
+}: PropsWithChildren<{ tone?: "error" | "info" | "success" }>) {
   return (
     <Text
       accessibilityRole="alert"
-      style={[styles.message, tone === "error" ? styles.error : null]}
+      style={[
+        styles.message,
+        tone === "error" ? styles.error : null,
+        tone === "success" ? styles.success : null,
+      ]}
     >
       {children}
     </Text>
@@ -202,6 +242,23 @@ const styles = StyleSheet.create({
   },
   error: {
     color: colors.danger,
+  },
+  success: {
+    color: colors.primary,
+    fontWeight: "600",
+  },
+  secondaryButton: {
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 16,
+  },
+  secondaryButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
   },
   link: {
     alignSelf: "flex-start",

@@ -166,6 +166,89 @@ export async function listOutboxRowsForUser(userId: string): Promise<OutboxRow[]
   return rows.map(fromDb);
 }
 
+// One user's rows that are not on the server yet (pending or failed),
+// newest first.
+export async function listUnsyncedRowsForUser(userId: string): Promise<OutboxRow[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<DbRow>(
+    `SELECT ${COLUMNS} FROM outbox
+     WHERE user_id = ? AND sync_state IN ('pending', 'failed')
+     ORDER BY created_at DESC`,
+    [userId],
+  );
+  return rows.map(fromDb);
+}
+
+export async function getOutboxRowForUser(
+  userId: string,
+  clientRecordId: string,
+): Promise<OutboxRow | null> {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<DbRow>(
+    `SELECT ${COLUMNS} FROM outbox WHERE user_id = ? AND client_record_id = ?`,
+    [userId, clientRecordId],
+  );
+  return row ? fromDb(row) : null;
+}
+
+// Failed -> pending, so the next sync tries it again from its saved step.
+// Returns false if the row is not this user's failed row.
+export async function retryFailedRow(
+  userId: string,
+  clientRecordId: string,
+  at: string,
+): Promise<boolean> {
+  const db = await getDatabase();
+  const result = await db.runAsync(
+    `UPDATE outbox SET sync_state = 'pending', updated_at = ?
+     WHERE user_id = ? AND client_record_id = ? AND sync_state = 'failed'`,
+    [at, userId, clientRecordId],
+  );
+  return result.changes === 1;
+}
+
+// Deletes this user's failed row and returns its photo path (for the caller
+// to delete after the row is gone). Null if there was no such failed row.
+export async function deleteFailedRow(
+  userId: string,
+  clientRecordId: string,
+): Promise<{ photoPath: string | null } | null> {
+  const db = await getDatabase();
+  let deleted: { photoPath: string | null } | null = null;
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const row = await txn.getFirstAsync<{ photo_path: string | null }>(
+      `SELECT photo_path FROM outbox
+       WHERE user_id = ? AND client_record_id = ? AND sync_state = 'failed'`,
+      [userId, clientRecordId],
+    );
+    if (!row) return;
+    await txn.runAsync(
+      `DELETE FROM outbox WHERE user_id = ? AND client_record_id = ? AND sync_state = 'failed'`,
+      [userId, clientRecordId],
+    );
+    deleted = { photoPath: row.photo_path };
+  });
+  return deleted;
+}
+
+// Every photo path still referenced, for every user on this phone (photo
+// cleanup must never delete another user's waiting photo).
+export async function listPhotoReferences(): Promise<
+  { clientRecordId: string; photoPath: string; syncState: SyncState }[]
+> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    client_record_id: string;
+    photo_path: string;
+    sync_state: SyncState;
+  }>(`SELECT client_record_id, photo_path, sync_state FROM outbox WHERE photo_path IS NOT NULL`);
+  return rows.map((row) => ({
+    clientRecordId: row.client_record_id,
+    photoPath: row.photo_path,
+    syncState: row.sync_state,
+  }));
+}
+
 async function run(sql: string, params: SQLite.SQLiteBindValue[]): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(sql, params);
