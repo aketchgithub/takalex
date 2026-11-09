@@ -2,7 +2,15 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { Session, User } from "@supabase/supabase-js";
 
+import {
+  chooseStartupSession,
+  classifyProfileError,
+  resolveProfile,
+  type OfflineMode,
+  type ProfileFetch,
+} from "@/lib/authResolution";
 import { readFunctionFailure } from "@/lib/functions";
+import { toRemoteError } from "@/lib/outbox/errors";
 import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { profileSchema, type InviteRole, type Profile } from "@/types/auth";
@@ -48,9 +56,16 @@ type AuthState = {
   isInviting: boolean;
   isActivating: boolean;
   authError: string | null;
+  // Not persisted. "cached": the profile could not be checked (no
+  // connection) and the cached profile of this same, active user is in use.
+  // "no_cache": blocked for the same reason. null: checked with the server.
+  offline: OfflineMode;
   setIsHydrated: () => void;
   initialize: () => Promise<void>;
   loadSession: (session: Session | null) => Promise<void>;
+  // Re-checks the profile with the server without showing the loading
+  // screen (used when the app returns to the foreground or reconnects).
+  refreshProfile: () => Promise<void>;
   setSession: (session: Session | null) => void;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   activateAccount: (
@@ -68,75 +83,64 @@ type AuthState = {
   setAuthError: (message: string | null) => void;
 };
 
-async function loadProfile(session: Session): Promise<void> {
-  useAuthStore.setState({
-    session,
-    user: session.user,
-    isLoading: true,
-    authError: null,
-  });
+async function fetchProfile(userId: string): Promise<ProfileFetch> {
+  try {
+    const { data, error, status } = await supabase
+      .from("profiles")
+      .select("id, full_name, phone, role, is_active, created_at")
+      .eq("id", userId)
+      .maybeSingle();
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, phone, role, is_active, created_at")
-    .eq("id", session.user.id)
-    .maybeSingle();
+    if (error) {
+      return classifyProfileError({ message: error.message, status, code: error.code || undefined });
+    }
+    // No row, or a row that is not a valid profile: null.
+    const result = profileSchema.safeParse(data);
+    return { kind: "ok", profile: result.success ? result.data : null };
+  } catch (error: unknown) {
+    return classifyProfileError(toRemoteError(error));
+  }
+}
+
+// background: re-check without the loading screen, so role screens (and a
+// half-filled delivery form) stay mounted while it runs.
+async function loadProfile(session: Session, { background = false } = {}): Promise<void> {
+  // The persisted profile, read before anything here changes it. It is only
+  // ever used for this same user (resolveProfile checks the id).
+  const cached = useAuthStore.getState().profile;
+
+  if (!background) {
+    useAuthStore.setState({
+      session,
+      user: session.user,
+      isLoading: true,
+      authError: null,
+    });
+  }
+
+  const fetched = await fetchProfile(session.user.id);
 
   if (useAuthStore.getState().session?.user.id !== session.user.id) {
     return;
   }
 
-  if (error) {
-    useAuthStore.setState({
-      session,
-      user: session.user,
-      profile: null,
-      role: null,
-      isLoading: false,
-      authError: `Could not load your profile: ${error.message}`,
-    });
-    return;
-  }
-
-  const result = profileSchema.safeParse(data);
-
-  if (!result.success) {
-    useAuthStore.setState({
-      session,
-      user: session.user,
-      profile: null,
-      role: null,
-      isLoading: false,
-      authError:
-        "Your account profile is missing or invalid. Ask an administrator to check your account.",
-    });
-    return;
-  }
-
-  // An inactive profile (for example after a failed activation, which can
-  // leave a user who can sign in) keeps authError set; app/index.tsx shows it
-  // and the role layouts refuse to render.
-  if (!result.data.is_active) {
-    useAuthStore.setState({
-      session,
-      user: session.user,
-      profile: result.data,
-      role: result.data.role,
-      isLoading: false,
-      authError: "Your account is inactive. Ask an administrator for help.",
-    });
-    return;
-  }
-
+  // A server answer of missing / invalid / inactive blocks as before: an
+  // inactive profile (for example after a failed activation) keeps authError
+  // set; app/index.tsx shows it and the role layouts refuse to render. Only a
+  // network failure can fall back to the cached profile.
+  const resolution = resolveProfile(session.user.id, fetched, cached);
   useAuthStore.setState({
     session,
     user: session.user,
-    profile: result.data,
-    role: result.data.role,
+    profile: resolution.profile,
+    role: resolution.profile?.role ?? null,
     isLoading: false,
-    authError: null,
+    authError: resolution.authError,
+    offline: resolution.offline,
   });
 }
+
+let profileRefresh: Promise<void> | null = null;
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -150,6 +154,7 @@ export const useAuthStore = create<AuthState>()(
       isInviting: false,
       isActivating: false,
       authError: null,
+      offline: null,
 
       setIsHydrated: () => set({ isHydrated: true }),
 
@@ -157,19 +162,29 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data, error } = await supabase.auth.getSession();
 
-          if (error) {
+          // Offline with an expired access token, getSession() returns no
+          // session and a network error although supabase-js kept the
+          // session. Then the persisted session is used, and loadProfile
+          // decides whether its cached profile may be used.
+          const startup = chooseStartupSession(
+            { session: data.session, error: error ? toRemoteError(error) : null },
+            get().session,
+          );
+
+          if (startup.kind === "error") {
             set({
               session: null,
               user: null,
               profile: null,
               role: null,
               isLoading: false,
-              authError: `Could not restore your session: ${error.message}`,
+              offline: null,
+              authError: `Could not restore your session: ${startup.message}`,
             });
             return;
           }
 
-          await get().loadSession(data.session);
+          await get().loadSession(startup.session);
         } catch (error: unknown) {
           const message =
             error instanceof Error
@@ -196,6 +211,7 @@ export const useAuthStore = create<AuthState>()(
             role: null,
             isLoading: false,
             authError: null,
+            offline: null,
           });
           return;
         }
@@ -216,9 +232,41 @@ export const useAuthStore = create<AuthState>()(
             profile: null,
             role: null,
             isLoading: false,
+            offline: null,
             authError: `Could not load your profile: ${message}`,
           });
         }
+      },
+
+      refreshProfile: () => {
+        // One re-check at a time (foreground, timer and token refresh can
+        // all ask at once).
+        if (profileRefresh) return profileRefresh;
+        profileRefresh = (async () => {
+          const current = get().session;
+          if (!current) return;
+
+          // Refreshes the access token first if it has expired.
+          const { data, error } = await supabase.auth.getSession();
+          // Still offline (or any other auth error): keep the current state.
+          // If the session is really gone, supabase-js emits SIGNED_OUT and
+          // the auth state listener signs the store out.
+          if (error) return;
+          if (!data.session) {
+            // supabase-js no longer holds a session: signed out.
+            await get().loadSession(null);
+            return;
+          }
+          // A different user is handled by the auth state listener.
+          if (data.session.user.id !== current.user.id) return;
+
+          await loadProfile(data.session, { background: true });
+        })()
+          .catch(() => undefined)
+          .finally(() => {
+            profileRefresh = null;
+          });
+        return profileRefresh;
       },
 
       setSession: (session) =>
@@ -386,6 +434,7 @@ export const useAuthStore = create<AuthState>()(
             role: null,
             isLoading: false,
             authError: null,
+            offline: null,
           });
         } catch (error: unknown) {
           set({

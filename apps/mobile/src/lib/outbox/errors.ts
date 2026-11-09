@@ -29,7 +29,7 @@ export class PermanentSyncError extends Error {
 export const NOT_ALLOWED_REASON = "Not allowed by the server";
 
 const NETWORK_PATTERN =
-  /network request failed|failed to fetch|fetcherror|network ?error|timed? ?out|timeout|aborted|econn|enotfound|eai_again|socket hang up/i;
+  /network request failed|failed to fetch|fetch failed|failed to connect|could not connect|fetcherror|network ?error|timed? ?out|timeout|aborted|econn|enotfound|eai_again|socket hang up/i;
 
 const NETWORK_NAMES = new Set([
   "TypeError",
@@ -74,6 +74,17 @@ export function isStorageDuplicate(error: RemoteError): boolean {
   );
 }
 
+// The request never got an HTTP answer: no connection, refused connection,
+// timeout. postgrest-js and auth-js report this as status 0; a thrown fetch
+// error has no status and a recognisable name or message.
+export function isNetworkError(error: RemoteError): boolean {
+  return (
+    error.status === 0 ||
+    (error.status === undefined &&
+      (NETWORK_NAMES.has(error.name ?? "") || NETWORK_PATTERN.test(error.message.trim())))
+  );
+}
+
 function httpStatus(error: RemoteError): number | undefined {
   if (error.status !== undefined && error.status !== 0) return error.status;
   if (error.statusCode && /^\d{3}$/.test(error.statusCode)) return Number(error.statusCode);
@@ -91,11 +102,7 @@ export function classifyError(raw: unknown): ClassifiedError {
   const detail = error.message.trim();
 
   // Never reached the server.
-  if (
-    status === 0 ||
-    (status === undefined &&
-      (NETWORK_NAMES.has(error.name ?? "") || NETWORK_PATTERN.test(detail)))
-  ) {
+  if (status === 0 || (status === undefined && isNetworkError(error))) {
     return {
       kind: "retryable",
       reason: "No connection to Takalex. It will be sent automatically when you are back online.",

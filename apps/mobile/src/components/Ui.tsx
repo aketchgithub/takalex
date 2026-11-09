@@ -11,6 +11,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { OFFLINE_NOTICE } from "@/lib/authResolution";
+import { useAuthStore } from "@/stores/authStore";
+
 const colors = {
   background: "#f6f7f2",
   border: "#d9dfd1",
@@ -33,11 +36,24 @@ export function Screen({
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.brand}>TAKALEX</Text>
+        <OfflineNotice />
         <Text style={styles.title}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         <View style={styles.body}>{children}</View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// Shown on every screen while the signed-in user's profile could not be
+// checked with the server and the cached one is in use.
+function OfflineNotice() {
+  const offline = useAuthStore((state) => state.offline === "cached" && state.session !== null);
+  if (!offline) return null;
+  return (
+    <Text accessibilityRole="alert" style={styles.offline}>
+      {OFFLINE_NOTICE}
+    </Text>
   );
 }
 
@@ -179,6 +195,19 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 2,
     marginBottom: 10,
+  },
+  offline: {
+    alignSelf: "flex-start",
+    backgroundColor: "#fff4d6",
+    borderColor: "#e3c56f",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#6b4e00",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   title: {
     color: colors.text,
