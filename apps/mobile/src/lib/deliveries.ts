@@ -31,20 +31,42 @@ const rowSchema = z.object({
   material: embeddedMaterial,
 });
 
+// collection_logs reaches materials two ways: the direct material_code FK and
+// many-to-many through collection_verified_items (whose primary key is
+// (collection_id, material_code)). A bare materials(...) embed is ambiguous
+// (PGRST201, HTTP 300), so name the direct FK.
+const SELECT_COLUMNS =
+  "id, client_record_id, material_code, reported_weight_kg, verified_weight_kg, status, rejection_reason, submitted_at, material:materials!collection_logs_material_code_fkey(display_name)";
+
 export async function listMyDeliveries(userId: string): Promise<ServerDelivery[]> {
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from("collection_logs")
-    .select(
-      "id, client_record_id, material_code, reported_weight_kg, verified_weight_kg, status, rejection_reason, submitted_at, material:materials(display_name)",
-    )
+    .select(SELECT_COLUMNS)
     .eq("collector_id", userId)
     .order("submitted_at", { ascending: false })
     .limit(HISTORY_LIMIT);
 
-  if (error) throw new Error("Could not load your deliveries from Takalex. Check your connection and try again.");
+  if (error) {
+    // Diagnostics for the Metro log: the PostgREST error fields only (no
+    // headers, keys or tokens). The collector sees the generic message.
+    console.warn(
+      `[history] collection_logs query failed: HTTP ${status} code=${error.code || "none"} message=${error.message}` +
+        ` details=${JSON.stringify(error.details ?? null)} hint=${error.hint ?? "none"}`,
+    );
+    throw new Error("Could not load your deliveries from Takalex. Check your connection and try again.");
+  }
 
   const parsed = z.array(rowSchema).safeParse(data ?? []);
-  if (!parsed.success) throw new Error("Your deliveries could not be read.");
+  if (!parsed.success) {
+    // Paths and messages only, not row values.
+    console.warn(
+      `[history] collection_logs rows did not match the expected shape: ${parsed.error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("; ")}`,
+    );
+    throw new Error("Your deliveries could not be read.");
+  }
 
   return parsed.data.map((row) => ({
     id: row.id,
