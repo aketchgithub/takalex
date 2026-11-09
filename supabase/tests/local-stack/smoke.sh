@@ -153,6 +153,8 @@ check "anon: insert that sets status denied" "$PUB_KEY" POST access_requests 401
   "return=minimal"
 check "anon: rpc/review_collection denied" "$PUB_KEY" POST rpc/review_collection 401 "$DENIED" \
   '{"p_collection_id":"00000000-0000-0000-0000-000000000000","p_approved":true,"p_verified_items":[{"material_code":"PET","weight_kg":1}],"p_rejection_reason":null}'
+check "anon: rpc/reviewable_collector_names denied" "$PUB_KEY" POST rpc/reviewable_collector_names 401 "$DENIED" \
+  '{"p_collector_ids":["00000000-0000-0000-0000-000000000000"]}'
 check "anon: rpc/bootstrap_first_admin denied" "$PUB_KEY" POST rpc/bootstrap_first_admin 401 "$DENIED" \
   "{\"p_email\":\"$EMAIL\"}"
 # limit=0: if this denial ever regresses, the failure output contains no hashes.

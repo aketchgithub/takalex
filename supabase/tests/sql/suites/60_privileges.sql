@@ -101,6 +101,7 @@ INSERT INTO t.expected_functions VALUES
   ('public.is_evidence_object_path(text,uuid,uuid)',           'rls_helper', false, false, true,  false),
   ('public.public_site_options()',                             'rpc',        true,  true,  true,  false),
   ('public.review_collection(uuid,boolean,jsonb,text)',        'rpc',        true,  false, true,  false),
+  ('public.reviewable_collector_names(uuid[])',                'rpc',        true,  false, true,  false),
   ('public.revoke_invitation(uuid)',                           'rpc',        true,  false, true,  false),
   ('public.register_invitation(uuid,text,text,public.user_role,uuid[],uuid,text)', 'rpc', true, false, false, true),
   ('public.verify_invitation_code(text,text)',                 'rpc',        true,  false, false, true),

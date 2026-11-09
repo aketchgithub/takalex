@@ -46,6 +46,7 @@ and never touches a remote project.
 | `50_invitations_concurrency` | concurrent register / reissue / verify / consume / revoke |
 | `60_privileges` | exact grant and EXECUTE matrix for every table and function in `public`, ACLs, ownership, RLS, default privileges |
 | `70_evidence_storage` | the `collection-evidence` bucket row and the RLS policies on `storage.objects` (against the storage stub) |
+| `80_reviewable_collector_names` | `reviewable_collector_names()` (007): names only for collectors with deliveries at the caller's reviewable sites; nothing for collectors, recyclers, inactive or unassigned managers, anon |
 
 Writing a test: one top-level `DO` block per test, ending in
 `PERFORM t.pass('description');`. The runner counts `t.pass(` calls in the
