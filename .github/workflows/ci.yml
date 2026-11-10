@@ -36,12 +36,23 @@ jobs:
       # Dedicated port for the throwaway cluster; run.sh refuses 5432,
       # 54320-54329, ports in supabase/config.toml and ports already in use.
       SQLTEST_PORT: '55439'
+      # PostgreSQL 17 matches the local Supabase stack ([db] in supabase/config.toml
+      # sets no major_version, so the CLI default applies). Pinned so CI does not
+      # change silently when Ubuntu's default PostgreSQL moves.
+      PG_BIN: /usr/lib/postgresql/17/bin
     steps:
       - uses: actions/checkout@v4
-      - name: Install PostgreSQL server binaries and contrib (dblink)
+      - name: Install PostgreSQL 17 from the PostgreSQL apt repository
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql postgresql-contrib
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          # Adds apt.postgresql.org (PGDG) with its signing key, then apt-get update.
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          # postgresql-17 includes contrib modules such as dblink.
+          sudo apt-get install -y --no-install-recommends postgresql-17
+          "$PG_BIN/postgres" --version | grep -E ' 17\.' ||
+            { echo "expected PostgreSQL 17 in $PG_BIN" >&2; exit 1; }
+          test -f /usr/share/postgresql/17/extension/dblink.control
       - name: Run SQL suites
         run: supabase/tests/sql/run.sh "$SQLTEST_PORT"
 

@@ -121,7 +121,7 @@ END $$;
 DO $$
 DECLARE v_bad TEXT;
 BEGIN
-  SELECT string_agg(c.relname || ' (relkind ' || c.relkind || ')', ', ') INTO v_bad
+  SELECT string_agg(c.relname || ' (relkind ' || c.relkind::text || ')', ', ') INTO v_bad
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind NOT IN ('r', 'i');
   ASSERT v_bad IS NULL, 'unexpected views/sequences/other relations in public: ' || v_bad;
@@ -431,7 +431,7 @@ DECLARE
   f CONSTANT TEXT := 'public.zz_default_privilege_probe()';
 BEGIN
   FOR v_line IN
-    SELECT format('MATRIX default-acl %s %s %s', pg_get_userbyid(d.defaclrole), d.defaclobjtype,
+    SELECT format('MATRIX default-acl %s %s %s', pg_get_userbyid(d.defaclrole), d.defaclobjtype::text,
                   array_to_string(d.defaclacl, ' '))
     FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
     WHERE n.nspname = 'public' OR d.defaclnamespace = 0
@@ -503,7 +503,7 @@ DECLARE
 BEGIN
   PERFORM t.become('postgres');
 
-  SELECT string_agg(format('%s %s -> %s', pg_get_userbyid(d.defaclrole), d.defaclobjtype,
+  SELECT string_agg(format('%s %s -> %s', pg_get_userbyid(d.defaclrole), d.defaclobjtype::text,
                            pg_get_userbyid(a.grantee)), ', ') INTO v_bad
   FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace,
        aclexplode(d.defaclacl) a
