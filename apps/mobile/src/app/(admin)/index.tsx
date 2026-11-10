@@ -15,6 +15,10 @@ export default function AdminOverview() {
         label="Review access requests"
         onPress={() => router.push("/(admin)/access-requests")}
       />
+      <PrimaryButton
+        label="Manage invitations"
+        onPress={() => router.push("/(admin)/invitations")}
+      />
     </Screen>
   );
 }

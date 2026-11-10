@@ -194,7 +194,8 @@ function remember(j) {
 // bearer omitted (undefined) = the dev admin's JWT; null = no Authorization
 // header at all (apikey only). Never pass undefined to mean "no header".
 function inviteRaw(body, bearer = ADMIN_JWT) {
-  if (typeof body?.email === "string") emailsUsed.add(body.email.trim().toLowerCase());
+  // An empty or blank email is not an address (and "" would match every log).
+  if (typeof body?.email === "string" && body.email.trim()) emailsUsed.add(body.email.trim().toLowerCase());
   return call("POST", "/functions/v1/invite-user", { body, bearer });
 }
 async function invite(k, { role = "collector", siteIds = [sites[0]], fullName = `Fn ${k}` } = {}) {
@@ -598,6 +599,106 @@ async function nonAdminCreate(active) {
   check(r.status === 403 && !userExists(email("deny-collector")), "active collector -> 403, no Auth user", `${r.status}`);
 }
 
+// ------------------------------------------------------------------ invite-user from an access request
+// Requests are inserted directly (the public insert is covered by smoke.sh).
+// Their full_name starts with fn-<run>- so cleanup can find them, including
+// the ones with no email.
+const REQUEST_NAME = `fn-${RUN}-request`;
+function accessRequest(k, { mail = email(k), phone = null, role = "collector", siteId = sites[1], status = "submitted" } = {}) {
+  if (mail) emailsUsed.add(mail);
+  return sql(`INSERT INTO public.access_requests (full_name, email, phone, role, site_id, status)
+    VALUES (${lit(`${REQUEST_NAME} ${k}`)}, ${mail ? lit(mail) : "NULL"}, ${phone ? lit(phone) : "NULL"},
+            ${lit(role)}, ${siteId ? lit(siteId) : "NULL"}, ${lit(status)}) RETURNING id`);
+}
+const requestRow = (id) => {
+  const [status, reviewedBy] = sql(`SELECT status, coalesce(reviewed_by::text, '')
+    FROM public.access_requests WHERE id = ${lit(id)}`).split("|");
+  return { status, reviewedBy };
+};
+// As the app does before inviting: the admin approves the request with their
+// own JWT, so the reviewer trigger records them.
+async function approveAsAdmin(id) {
+  const r = await rest("PATCH", `/access_requests?id=eq.${id}`, {
+    jwt: ADMIN_JWT, prefer: "return=minimal", body: { status: "approved" },
+  });
+  if (r.status !== 204) throw new Error(`approving access request failed: ${r.status}`);
+}
+const fromRequest = (k, accessRequestId, extra = {}) => ({
+  action: "create", email: email(k), fullName: `Fn ${k}`, role: "collector", siteIds: [sites[1]], accessRequestId, ...extra,
+});
+
+async function inviteFromAccessRequest(active) {
+  section("invite-user: approve and invite from an access request");
+
+  // 1. Request with an email: approved by the admin, then invited with the
+  // same email in another case. The request becomes invited, the admin stays
+  // reviewer, and the invitation carries the request's site.
+  const a = accessRequest("ar-ok", { siteId: sites[1] });
+  await approveAsAdmin(a);
+  let r = await inviteRaw(fromRequest("ar-ok", a, { email: `  ${email("ar-ok").toUpperCase()} ` }));
+  let j = parse(r);
+  if (j?.code) remember(j);
+  let row = requestRow(a);
+  check(r.status === 201 && CODE_RE.test(j?.code ?? "") && j?.warning === undefined,
+    "request with email (approved): 201 with a code, no warning; email matched case-insensitively", `${r.status} ${j?.error ?? ""}`);
+  check(row.status === "invited" && row.reviewedBy === ADMIN_ID,
+    "the request is now invited and the admin is still its reviewer", `${row.status} reviewer=${row.reviewedBy === ADMIN_ID ? "admin" : row.reviewedBy || "none"}`);
+  const pa = profile(email("ar-ok"));
+  check(pa.role === "collector" && !pa.active && siteSet(email("ar-ok")) === sites[1] &&
+    j?.invitationId && state(j.invitationId).status === "pending",
+    "the invitation is pending, for a collector at the request's site (group)");
+
+  // 2. Request with no email (phone only): the admin-entered email is used.
+  const b = accessRequest("ar-noemail", { mail: null, phone: "0712345678", siteId: sites[2] });
+  await approveAsAdmin(b);
+  const before = runUserCount();
+  r = await inviteRaw(fromRequest("ar-noemail", b, { email: "", siteIds: [sites[2]] }));
+  check(r.status === 400 && /email address is required to approve this access request/.test(parse(r)?.error ?? "") &&
+    runUserCount() === before && requestRow(b).status === "approved",
+    "request without email and no email entered -> clear 400, no Auth user, request still approved", `${r.status} ${parse(r)?.error ?? ""}`);
+  r = await inviteRaw(fromRequest("ar-noemail", b, { siteIds: [sites[2]] }));
+  j = parse(r);
+  if (j?.code) remember(j);
+  row = requestRow(b);
+  check(r.status === 201 && row.status === "invited" && row.reviewedBy === ADMIN_ID &&
+    siteSet(email("ar-noemail")) === sites[2],
+    "request without email + admin-entered email -> 201; request invited, admin reviewer, site carried", `${r.status} ${j?.error ?? ""}`);
+
+  // 3. A request still 'submitted' may be invited directly too.
+  const c = accessRequest("ar-submitted", { siteId: sites[0] });
+  r = await inviteRaw(fromRequest("ar-submitted", c, { siteIds: [sites[0]] }));
+  j = parse(r);
+  if (j?.code) remember(j);
+  check(r.status === 201 && requestRow(c).status === "invited", "submitted request -> 201, request invited", `${r.status}`);
+
+  // 4. Refusals: nothing is created and the request is unchanged.
+  const mis = accessRequest("ar-mismatch");
+  await approveAsAdmin(mis);
+  const refusals = [
+    ["email different from the request's", "ar-mismatch-other", mis, 400, /must match/, "approved"],
+    ["already-invited request", "ar-again", a, 409, /already been invited/, "invited"],
+  ];
+  const rej = accessRequest("ar-rejected", { status: "rejected" });
+  refusals.push(["rejected request", "ar-rej", rej, 409, /was rejected/, "rejected"]);
+  refusals.push(["unknown request id", "ar-unknown", randomUUID(), 404, /not found/, null]);
+  for (const [label, k, id, status, msg, after] of refusals) {
+    const n = runUserCount();
+    r = await inviteRaw(fromRequest(k, id));
+    check(r.status === status && msg.test(parse(r)?.error ?? "") && !userExists(email(k)) && runUserCount() === n &&
+      (after === null || requestRow(id).status === after),
+      `${label} -> ${status}, no Auth user, request unchanged`, `${r.status} ${parse(r)?.error ?? ""}`);
+  }
+  r = await inviteRaw(fromRequest("ar-badid", "not-a-uuid"));
+  check(r.status === 400 && /valid access request ID/.test(parse(r)?.error ?? "") && !userExists(email("ar-badid")),
+    "malformed accessRequestId -> 400, no Auth user", `${r.status}`);
+
+  // 5. Non-admin caller.
+  const d = accessRequest("ar-nonadmin");
+  r = await inviteRaw(fromRequest("ar-nonadmin", d), active.jwt);
+  check(r.status === 403 && !userExists(email("ar-nonadmin")) && requestRow(d).status === "submitted",
+    "non-admin (active collector) -> 403, no Auth user, request unchanged", `${r.status}`);
+}
+
 function validityFailuresUniform() {
   section("accept-invitation: uniform failures");
   const [first] = invalidResponses;
@@ -889,6 +990,7 @@ async function main() {
   await inviteUserRegistrationFailure(created["r-coll"]);
   const active = await acceptInvitation();
   await nonAdminCreate(active);
+  await inviteFromAccessRequest(active);
   await inviteUserReissue(created, active);
   validityFailuresUniform();
   await evidenceStorage();
@@ -898,10 +1000,13 @@ async function main() {
 // ------------------------------------------------------------------ logs + cleanup
 function scanLogs() {
   section("logs");
+  // Every scanned value must be a real address: an empty string would match
+  // any log and hide whether a real email leaked.
+  const notEmails = [...emailsUsed].filter((e) => !/^[^\s@]+@[^\s@]+$/.test(e));
+  if (notEmails.length) throw new Error(`${notEmails.length} recorded test email(s) are not addresses; fix the test`);
   const since = runStart.toISOString();
   const containers = ["edge_runtime", "auth", "kong", "rest", "db"].map((s) => `supabase_${s}_${projectId}`);
-  let hits = 0, emailHits = 0;
-  for (const name of containers) {
+  let hits = 0, emailHits = 0;  for (const name of containers) {
     // stdout and stderr of the container, together.
     const logs = execFileSync("sh", ["-c", 'docker logs --since "$1" "$2" 2>&1', "sh", since, name],
       { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
@@ -911,12 +1016,13 @@ function scanLogs() {
     for (const c of codes) if (upper.includes(normalise(c))) n++;   // normalised form too
     hits += n;
     if (name.startsWith("supabase_edge_runtime_")) {
-      for (const e of emailsUsed) if (logs.toLowerCase().includes(e)) emailHits++;
+      const lower = logs.toLowerCase();
+      for (const e of emailsUsed) if (lower.includes(e)) emailHits++;
     }
     console.log(`      ${name}: ${n} code/password match(es)`);
   }
   check(hits === 0, `no code or password (${secrets.size} values) in the logs of ${containers.length} containers`);
-  check(emailHits === 0, "no test email in the Edge Function logs");
+  check(emailHits === 0, `no test email (${emailsUsed.size} addresses) in the Edge Function logs`, `${emailHits} found`);
 }
 
 let cleaning = null;
@@ -937,6 +1043,9 @@ function cleanup() {
       }).catch(() => null);
     }
     sql(`DELETE FROM public.collection_logs WHERE collector_id IN (SELECT id FROM auth.users WHERE ${where})`);
+    const leftRequests = sql(`WITH d AS (DELETE FROM public.access_requests
+        WHERE full_name LIKE ${lit(`${REQUEST_NAME} %`)} RETURNING 1) SELECT count(*) FROM d`);
+    console.log(`      deleted ${leftRequests} access request(s)`);
     const leftObjects = sql(`SELECT count(*) FROM storage.objects WHERE ${runObjectsWhere}`);
     check(leftObjects === "0", `deleted ${objectNames.length} evidence object(s) via the Storage API; ${leftObjects} left`);
     const rs = await Promise.all(ids.map((id) =>

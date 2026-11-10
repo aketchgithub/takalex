@@ -115,22 +115,6 @@ export async function getPublicSiteOptions(): Promise<PublicSiteOption[]> {
 export type AccessRequestStatus = z.infer<typeof accessRequestStatusSchema>;
 export type AccessRequestRole = z.infer<typeof accessRequestRoleSchema>;
 
-export type AccessRequestRecord = {
-  id: string;
-  full_name: string;
-  email: string | null;
-  phone: string | null;
-  role: AccessRequestRole;
-  site_id: string | null;
-  site: { name: string } | null;
-  referral_source: string | null;
-  status: AccessRequestStatus;
-  created_at: string;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  notes: string | null;
-};
-
 export type SubmitAccessRequestResult = {
   error: { message: string } | null;
 };
@@ -195,81 +179,4 @@ export async function submitAccessRequest(
       message: "Your request could not be submitted. Please try again later.",
     },
   };
-}
-
-// The embedded site may come back as an object or a one-element array
-// (the client has no generated types); either way it becomes { name } | null.
-const embeddedSiteSchema = z
-  .union([z.object({ name: z.string() }), z.array(z.object({ name: z.string() }))])
-  .nullable()
-  .transform((value) => (Array.isArray(value) ? value[0] ?? null : value));
-
-const accessRequestRowSchema = z.object({
-  id: z.string().uuid(),
-  full_name: z.string(),
-  email: z.string().nullable(),
-  phone: z.string().nullable(),
-  role: accessRequestRoleSchema,
-  site_id: z.string().uuid().nullable(),
-  site: embeddedSiteSchema,
-  referral_source: z.string().nullable(),
-  status: accessRequestStatusSchema,
-  created_at: z.string(),
-  reviewed_by: z.string().uuid().nullable(),
-  reviewed_at: z.string().nullable(),
-  notes: z.string().nullable(),
-});
-
-// Explicit columns (no select("*")), with the requested site's name. Admins
-// can read every site under sites_read_assigned.
-export async function getAccessRequests(): Promise<{
-  data: AccessRequestRecord[] | null;
-  error: { message: string } | null;
-}> {
-  const { data, error } = await supabase
-    .from("access_requests")
-    .select(
-      "id, full_name, email, phone, role, site_id, referral_source, status, created_at, reviewed_by, reviewed_at, notes, site:sites(name)",
-    )
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    return { data: null, error };
-  }
-
-  const parsed = z.array(accessRequestRowSchema).safeParse(data ?? []);
-  if (!parsed.success) {
-    return { data: null, error: { message: "Access requests could not be read." } };
-  }
-
-  return { data: parsed.data, error: null };
-}
-
-export async function updateAccessRequestStatus(
-  id: string,
-  status: AccessRequestStatus,
-  notes?: string,
-) {
-  const { data: userData } = await supabase.auth.getUser();
-
-  if (!userData.user) {
-    return {
-      data: null,
-      error: { message: "You must sign in to review access requests." },
-    } as const;
-  }
-
-  // Admins may only update status and notes. reviewed_by and reviewed_at
-  // are set by the database (access_requests_set_reviewer trigger).
-  const { data, error } = await supabase
-    .from("access_requests")
-    .update({
-      status,
-      notes: notes?.trim() || null,
-    })
-    .eq("id", id)
-    .select()
-    .single();
-
-  return { data, error };
 }

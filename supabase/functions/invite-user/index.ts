@@ -1,9 +1,19 @@
 // invite-user: admin-only invitation Edge Function (code-based design,
 // docs/demo-plan.md section 1.1).
 //
-// POST { action: "create", email, fullName, role, siteIds? }
+// POST { action: "create", email, fullName, role, siteIds?, accessRequestId? }
 // POST { action: "reissue", invitationId, fullName?, role?, siteIds? }
-//   -> 201 { invitationId, code, expiresAt }
+//   -> 201 { invitationId, code, expiresAt, warning? }
+//
+// accessRequestId (create only): the invitation answers that access request.
+// The request must exist and be 'submitted' or 'approved'. If it has an
+// email, the invited email must match it (case-insensitive); if it has none,
+// the email the admin entered (confirmed with the requester by phone) is
+// used. Name, role and sites come from the body: the admin may edit them.
+// After the invitation is registered the request is marked 'invited' with
+// the service client (status only, return=minimal); the reviewer trigger
+// keeps the admin who approved it as reviewer. If that update fails, the
+// invitation stands and the response carries a warning.
 //
 // The plain invitation code is returned to the calling admin exactly once.
 // It is never logged or stored: the database only receives the lowercase hex
@@ -40,7 +50,11 @@ type CreateInput = {
   fullName: string;
   role: InviteRole;
   siteIds: string[];
+  accessRequestId: string | null;
 };
+
+// Request statuses an invitation may still answer.
+const OPEN_REQUEST_STATUSES = ["submitted", "approved"];
 
 type ReissueInput = {
   invitationId: string;
@@ -120,10 +134,23 @@ function siteCountError(role: InviteRole, siteIds: string[]): string | null {
 }
 
 function validateCreate(body: Record<string, unknown>): Result<CreateInput> {
+  let accessRequestId: string | null = null;
+  if (body.accessRequestId !== undefined && body.accessRequestId !== null) {
+    if (!isUuid(body.accessRequestId)) {
+      return { ok: false, error: "A valid access request ID is required." };
+    }
+    accessRequestId = body.accessRequestId.toLowerCase();
+  }
+
   const email =
     typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { ok: false, error: "Enter a valid email address." };
+    return {
+      ok: false,
+      error: accessRequestId && email === ""
+        ? "An email address is required to approve this access request. If the request has none, confirm one with the requester by phone and enter it."
+        : "Enter a valid email address.",
+    };
   }
 
   const fullName = validateFullName(body.fullName);
@@ -145,7 +172,10 @@ function validateCreate(body: Record<string, unknown>): Result<CreateInput> {
     return { ok: false, error: siteError };
   }
 
-  return { ok: true, data: { email, fullName: fullName.data, role, siteIds } };
+  return {
+    ok: true,
+    data: { email, fullName: fullName.data, role, siteIds, accessRequestId },
+  };
 }
 
 function validateReissue(body: Record<string, unknown>): Result<ReissueInput> {
@@ -260,11 +290,81 @@ async function readExpiresAt(admin: Client, invitationId: string) {
   return data.expires_at as string;
 }
 
+// The access request an invitation will answer, checked before any Auth
+// user is created. Explicit columns (service_role may read only these).
+async function checkAccessRequest(
+  admin: Client,
+  accessRequestId: string,
+  email: string,
+): Promise<Response | null> {
+  const { data: request, error } = await admin
+    .from("access_requests")
+    .select("id, email, status")
+    .eq("id", accessRequestId)
+    .maybeSingle();
+  if (error) {
+    console.error("Could not read access request", { code: error.code });
+    return respond(500, { error: "Could not load the access request." });
+  }
+  if (!request) {
+    return respond(404, { error: "Access request not found." });
+  }
+  if (!OPEN_REQUEST_STATUSES.includes(request.status)) {
+    return respond(409, {
+      error: request.status === "invited"
+        ? "This access request has already been invited."
+        : request.status === "rejected"
+          ? "This access request was rejected and cannot be invited."
+          : "This access request cannot be invited in its current state.",
+    });
+  }
+  const requestEmail = typeof request.email === "string"
+    ? request.email.trim().toLowerCase()
+    : "";
+  if (requestEmail !== "" && requestEmail !== email) {
+    return respond(400, {
+      error: "The email must match the one on the access request.",
+    });
+  }
+  return null;
+}
+
+// Marks the request invited after the invitation is registered. Status only,
+// return=minimal; the count tells whether a row (still open) was updated.
+// Returns a warning for the admin, or null.
+async function markRequestInvited(
+  admin: Client,
+  accessRequestId: string,
+): Promise<string | null> {
+  const { error, count } = await admin
+    .from("access_requests")
+    .update({ status: "invited" }, { count: "exact" })
+    .eq("id", accessRequestId)
+    .in("status", OPEN_REQUEST_STATUSES);
+  if (error || count !== 1) {
+    console.error("Could not mark access request invited", {
+      code: error?.code,
+      count,
+    });
+    return "The invitation was created, but the access request could not be marked as invited. Check it in Access requests.";
+  }
+  return null;
+}
+
 async function handleCreate(
   admin: Client,
   callerId: string,
   input: CreateInput,
 ): Promise<Response> {
+  if (input.accessRequestId) {
+    const refused = await checkAccessRequest(
+      admin,
+      input.accessRequestId,
+      input.email,
+    );
+    if (refused) return refused;
+  }
+
   const { data: created, error: createError } =
     await admin.auth.admin.createUser({
       email: input.email,
@@ -318,7 +418,15 @@ async function handleCreate(
   }
 
   const expiresAt = await readExpiresAt(admin, invitationId);
-  return respond(201, { invitationId, code, expiresAt });
+  const warning = input.accessRequestId
+    ? await markRequestInvited(admin, input.accessRequestId)
+    : null;
+  return respond(201, {
+    invitationId,
+    code,
+    expiresAt,
+    ...(warning ? { warning } : {}),
+  });
 }
 
 async function handleReissue(

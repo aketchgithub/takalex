@@ -43,7 +43,15 @@ export type ActivationResult =
 // The invitation code is returned to the caller only. It is never written to
 // this store, so it can never be persisted (see partialize below).
 export type InviteResult =
-  | { ok: true; invitationId: string; code: string; expiresAt: string | null }
+  | {
+      ok: true;
+      invitationId: string;
+      code: string;
+      expiresAt: string | null;
+      // Set when the invitation was created but its access request could
+      // not be marked invited.
+      warning: string | null;
+    }
   | { ok: false; message: string };
 
 type AuthState = {
@@ -78,6 +86,7 @@ type AuthState = {
     fullName: string,
     role: InviteRole,
     siteIds: string[],
+    accessRequestId?: string,
   ) => Promise<InviteResult>;
   signOut: () => Promise<void>;
   setAuthError: (message: string | null) => void;
@@ -371,12 +380,19 @@ export const useAuthStore = create<AuthState>()(
 
       // invite-user with action "create" (admin only; the function checks the
       // caller's JWT and is_active_admin()). The code is handed back once.
-      inviteUser: async (email, fullName, role, siteIds) => {
+      inviteUser: async (email, fullName, role, siteIds, accessRequestId) => {
         set({ isInviting: true });
 
         try {
           const { data, error } = await supabase.functions.invoke("invite-user", {
-            body: { action: "create", email, fullName, role, siteIds },
+            body: {
+              action: "create",
+              email,
+              fullName,
+              role,
+              siteIds,
+              ...(accessRequestId ? { accessRequestId } : {}),
+            },
           });
 
           if (error) {
@@ -408,6 +424,7 @@ export const useAuthStore = create<AuthState>()(
             invitationId,
             code,
             expiresAt: typeof expiresAt === "string" ? expiresAt : null,
+            warning: typeof data?.warning === "string" ? data.warning : null,
           };
         } catch {
           return { ok: false, message: NETWORK_MESSAGE };
