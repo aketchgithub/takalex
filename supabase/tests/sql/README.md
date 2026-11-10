@@ -47,6 +47,7 @@ and never touches a remote project.
 | `60_privileges` | exact grant and EXECUTE matrix for every table and function in `public`, ACLs, ownership, RLS, default privileges |
 | `70_evidence_storage` | the `collection-evidence` bucket row and the RLS policies on `storage.objects` (against the storage stub) |
 | `80_reviewable_collector_names` | `reviewable_collector_names()` (007): names only for collectors with deliveries at the caller's reviewable sites; nothing for collectors, recyclers, inactive or unassigned managers, anon |
+| `90_recycler_material_totals` | `recycler_material_totals()` (008): approved lines only, active recycler-visible materials with 0.00 rows, site filter, Nairobi-day date filter and its midnight boundary, access (recycler/admin only), aggregate-only columns |
 
 Writing a test: one top-level `DO` block per test, ending in
 `PERFORM t.pass('description');`. The runner counts `t.pass(` calls in the

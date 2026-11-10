@@ -2,6 +2,7 @@ import type { PropsWithChildren } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,16 +25,25 @@ const colors = {
   white: "#ffffff",
 };
 
+// onRefresh (optional) turns on pull to refresh; refreshing shows the
+// spinner while the reload runs.
 export function Screen({
   children,
   subtitle,
   title,
-}: PropsWithChildren<{ title: string; subtitle?: string }>) {
+  refreshing = false,
+  onRefresh,
+}: PropsWithChildren<{ title: string; subtitle?: string; refreshing?: boolean; onRefresh?: () => void }>) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl colors={[colors.primary]} onRefresh={onRefresh} refreshing={refreshing} tintColor={colors.primary} />
+          ) : undefined
+        }
       >
         <Text style={styles.brand}>TAKALEX</Text>
         <OfflineNotice />
