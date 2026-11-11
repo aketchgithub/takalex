@@ -1,6 +1,7 @@
 import { Redirect, router } from "expo-router";
 
-import { InlineLink, Message, PrimaryButton, Screen } from "@/components/Ui";
+import { Landing } from "@/components/Landing";
+import { Message, PrimaryButton, Screen } from "@/components/Ui";
 import { useAuthStore } from "@/stores/authStore";
 
 function LoadingScreen() {
@@ -50,19 +51,10 @@ export default function IndexRoute() {
   }
 
   return (
-    <Screen
-      title="Public discovery, invite-only action"
-      subtitle="Takalex helps communities and field teams manage verified collection work with clear onboarding and admin review."
-    >
-      <Message>
-        Anyone can learn about the platform, but collection, admin, and operational workflows are only available after approval and invitation.
-      </Message>
-      <PrimaryButton label="Request access" onPress={() => router.push("/request-access" as any)} />
-      <PrimaryButton label="How it works" onPress={() => router.push("/how-it-works" as any)} />
-      <PrimaryButton label="About Takalex" onPress={() => router.push("/about" as any)} />
-      <PrimaryButton label="View sites" onPress={() => router.push("/sites" as any)} />
-      <PrimaryButton label="Sign in" onPress={() => router.push("/(auth)/login" as any)} />
-      <InlineLink label="Join the waitlist" onPress={() => router.push("/waitlist" as any)} />
-    </Screen>
+    <Landing
+      onInvitationCode={() => router.push("/(auth)/activate")}
+      onRequestAccess={() => router.push("/request-access" as any)}
+      onSignIn={() => router.push("/(auth)/login" as any)}
+    />
   );
 }

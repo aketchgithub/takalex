@@ -122,12 +122,15 @@ export function PrimaryButton({
 export function SecondaryButton({
   disabled = false,
   label,
+  large = false,
   loading = false,
   onPress,
   tone = "default",
 }: {
   disabled?: boolean;
   label: string;
+  // Opt-in 52dp height for outdoor use (landing page); the default look is unchanged.
+  large?: boolean;
   loading?: boolean;
   onPress: () => void;
   tone?: "default" | "danger";
@@ -141,6 +144,7 @@ export function SecondaryButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.secondaryButton,
+        large ? styles.secondaryButtonLarge : null,
         { borderColor: color },
         pressed && !disabled && !loading ? styles.buttonPressed : null,
         disabled || loading ? styles.buttonDisabled : null,
@@ -149,7 +153,7 @@ export function SecondaryButton({
       {loading ? (
         <ActivityIndicator color={color} />
       ) : (
-        <Text style={[styles.secondaryButtonText, { color }]}>{label}</Text>
+        <Text style={[styles.secondaryButtonText, large ? styles.buttonText : null, { color }]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -175,14 +179,17 @@ export function Message({
 
 export function InlineLink({
   label,
+  large = false,
   onPress,
 }: {
   label: string;
+  // Opt-in 48dp touch target and larger text (landing page).
+  large?: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.link}>
-      <Text style={styles.linkText}>{label}</Text>
+    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.link, large ? styles.linkLarge : null]}>
+      <Text style={[styles.linkText, large ? styles.linkTextLarge : null]}>{label}</Text>
     </Pressable>
   );
 }
@@ -295,6 +302,10 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 16,
   },
+  secondaryButtonLarge: {
+    minHeight: 52,
+    paddingHorizontal: 18,
+  },
   secondaryButtonText: {
     fontSize: 15,
     fontWeight: "700",
@@ -302,6 +313,13 @@ const styles = StyleSheet.create({
   link: {
     alignSelf: "flex-start",
     paddingVertical: 6,
+  },
+  linkLarge: {
+    justifyContent: "center",
+    minHeight: 48,
+  },
+  linkTextLarge: {
+    fontSize: 17,
   },
   linkText: {
     color: colors.primary,
