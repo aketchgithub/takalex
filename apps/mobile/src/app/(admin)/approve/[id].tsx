@@ -1,5 +1,5 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 
 import { InvitationCodeCard, type IssuedInvitation } from "@/components/InvitationCodeCard";
 import { InviteForm } from "@/components/InviteForm";
@@ -9,14 +9,13 @@ import { approveAccessRequest, getAccessRequest } from "@/lib/admin/requests";
 import { useAuthStore } from "@/stores/authStore";
 import { roleLabels } from "@/types/auth";
 
-// Tab screens stay mounted, so the content is remounted for every visit and
-// every request id (fresh read, empty form state, no code left on screen).
+// A Stack screen: every open pushes a new instance and Back unmounts it, so
+// each visit starts with a fresh read, empty form state and no code left on
+// screen. The key also resets the content if the id param changes in place.
 export default function ApproveRequestScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [visit, setVisit] = useState(0);
-  useFocusEffect(useCallback(() => setVisit((v) => v + 1), []));
-  if (!id || visit === 0) return null;
-  return <ApproveContent key={`${id}:${visit}`} id={id} />;
+  if (!id) return null;
+  return <ApproveContent key={id} id={id} />;
 }
 
 type LoadState =
@@ -48,7 +47,12 @@ function ApproveContent({ id }: { id: string }) {
     };
   }, [id]);
 
-  const back = () => router.replace("/(admin)/access-requests");
+  // Pop back to Access requests (which reloads on focus). replace() here would
+  // put a second copy of the tabs on the Stack.
+  const back = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(admin)/(tabs)/access-requests");
+  };
 
   if (issued) {
     return <InvitationCodeCard issued={issued} title="Request approved" onDone={back} />;

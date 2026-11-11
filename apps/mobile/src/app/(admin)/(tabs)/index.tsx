@@ -20,15 +20,15 @@ export default function AdminOverview() {
       <AccountSummary showSites={false} />
       <PrimaryButton
         label="Invite a team member"
-        onPress={() => router.push("/(admin)/invite")}
+        onPress={() => router.push("/(admin)/(tabs)/invite")}
       />
       <PrimaryButton
         label="Review access requests"
-        onPress={() => router.push("/(admin)/access-requests")}
+        onPress={() => router.push("/(admin)/(tabs)/access-requests")}
       />
       <PrimaryButton
         label="Manage invitations"
-        onPress={() => router.push("/(admin)/invitations")}
+        onPress={() => router.push("/(admin)/(tabs)/invitations")}
       />
       <MaterialTotalsCard
         heading={totalsHeading("all")}

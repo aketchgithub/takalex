@@ -39,11 +39,11 @@ export default function IndexRoute() {
 
     switch (profile.role) {
       case "admin":
-        return <Redirect href="/(admin)" />;
+        return <Redirect href="/(admin)/(tabs)" />;
       case "collector":
         return <Redirect href="/(collector)" />;
       case "site_manager":
-        return <Redirect href="/(manager)" />;
+        return <Redirect href="/(manager)/(tabs)" />;
       case "recycler":
         return <Redirect href="/(recycler)" />;
     }

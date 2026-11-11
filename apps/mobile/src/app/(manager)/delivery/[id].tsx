@@ -1,4 +1,4 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -24,12 +24,11 @@ import {
   type VerifiableMaterial,
 } from "@/lib/review/model";
 
-// Tab screens stay mounted, so the content is remounted (fresh state, fresh
-// read, fresh signed URL) for every visit and every delivery id.
+// A Stack screen: every open pushes a new instance and Back unmounts it, so
+// each visit starts with fresh state, a fresh read and a fresh signed URL.
+// The key also resets the content if the id param ever changes in place.
 export default function DeliveryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [visit, setVisit] = useState(0);
-  useFocusEffect(useCallback(() => setVisit((v) => v + 1), []));
   if (!id) {
     return (
       <Screen title="Delivery">
@@ -37,9 +36,7 @@ export default function DeliveryScreen() {
       </Screen>
     );
   }
-  // visit is 0 only before the first focus event; render once focused.
-  if (visit === 0) return null;
-  return <DeliveryContent key={`${id}:${visit}`} id={id} />;
+  return <DeliveryContent key={id} id={id} />;
 }
 
 type DetailState =
@@ -71,7 +68,7 @@ function DeliveryContent({ id }: { id: string }) {
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace("/(manager)");
+    else router.replace("/(manager)/(tabs)");
   }, [router]);
 
   if (detail.status === "loading") {
@@ -102,8 +99,6 @@ function DeliveryContent({ id }: { id: string }) {
   const delivery = detail.delivery;
   return (
     <Screen title={collectorLabel(delivery.collectorName)} subtitle={delivery.siteName ?? "Unknown site"}>
-      <InlineLink label="‹ Back" onPress={goBack} />
-
       <Card>
         <Row label="Status" value={deliveryStatusLabel(delivery.status, delivery.rejectionReason)} />
         <Row label="Submitted to Takalex" value={formatDateTime(delivery.submittedAt)} />
