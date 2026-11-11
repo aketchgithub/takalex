@@ -181,6 +181,10 @@ describe("reviewErrorMessage", () => {
 
   it("explains connection and permission failures", () => {
     assert.match(reviewErrorMessage({ message: "TypeError: Network request failed", status: 0 }), /no connection/);
+    assert.match(
+      reviewErrorMessage({ message: "AbortError: The request timed out. Check your connection and try again.", status: 0 }),
+      /no connection/,
+    );
     assert.match(reviewErrorMessage(null), /no connection/);
     assert.match(reviewErrorMessage({ message: "permission denied", code: "42501", status: 403 }), /not allowed/);
     assert.equal(reviewErrorMessage({ message: "Bad Gateway", status: 502 }), "Not saved: Bad Gateway");

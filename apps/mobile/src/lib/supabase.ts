@@ -2,6 +2,7 @@ import "react-native-url-polyfill/auto";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { createFetchWithTimeout } from "@/lib/fetchWithTimeout";
 import { authStorage } from "@/lib/storage";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -20,4 +21,7 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     persistSession: true,
     storage: authStorage,
   },
+  // A hung server becomes an error after 20 s (120 s for Storage uploads)
+  // instead of an endless spinner.
+  global: { fetch: createFetchWithTimeout() },
 });
