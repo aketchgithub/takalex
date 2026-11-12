@@ -1,82 +1,85 @@
-# Takalex — project rules for Claude Code
+# Takalex: rules for AI coding assistants
 
-Waste collection tracking and verification MVP for Chemolex (client: Owino Aketch).
-Developer: Cynthia Chepkemoi Langat. Four-week, fixed-scope engagement.
-Android-first. Stack: Expo + React Native + TypeScript (apps/mobile), Supabase
-(Postgres, Auth, Edge Functions, Storage), Expo SQLite for offline, Sentry, GitHub Actions.
-Do not introduce another backend or replace the stack without explicit discussion.
-The demo brief and confirmed operating model are in docs/demo-plan.md; read it before demo work.
+Takalex is an Android-first app for recording and verifying plastic deliveries made by
+waste pickers at collection sites. Stack: Expo + React Native + TypeScript (`apps/mobile`),
+Supabase (Postgres, Auth, Edge Functions, Storage), Expo SQLite for offline, Sentry,
+GitHub Actions. Do not introduce another backend or replace the stack without discussion.
 
-## Hard rules — never break these
-- Never run `git push`, `git reset --hard`, `git clean`, `git checkout -- <file>`,
-  `git restore`, or drop/clear stashes. Uncommitted work on
-  `feat/takalex-database-foundation` is intentional and must be preserved.
-- Never deploy to the remote Supabase project (`omtmqtgmbtkutadbkjzv`):
-  no `supabase db push`, no `--linked` resets, no `functions deploy`, no `secrets set`.
-  Migrations are tested locally (`supabase start`, `supabase db reset`) and deployed
-  only after Cynthia explicitly agrees.
-- Never put the Supabase service-role key, Resend API key or any secret in mobile code,
-  in `EXPO_PUBLIC_*` variables, or in chat. Server secrets live in Supabase Edge Function secrets.
+## Hard rules
+- Never run `git push`, `git reset --hard`, `git clean`, `git checkout -- <file>` or
+  `git restore`, and never drop or clear stashes. The maintainer commits and pushes.
+- Never deploy to or change the hosted Supabase project: no `supabase db push`, no
+  `--remote` or `--linked` flags, no `functions deploy`, no `secrets set`. Supabase CLI 3
+  targets the local stack by default; keep it that way. Deployments are done by the
+  maintainer only.
+- Never put a service-role key, secret key or any other secret in mobile code, in
+  `EXPO_PUBLIC_*` variables or in chat. The app only ever holds the publishable key.
 - Never read or print `.env` files.
-- Ask before deleting code, files or data, or before any irreversible change.
+- Ask before deleting code, files or data, and before any irreversible change.
+- Do not add, remove or upgrade dependencies without asking. The lockfile is generated
+  with npm 10.9.9, the version CI uses.
 
 ## How to work
 - Inspect the actual files before proposing changes; never assume state from docs.
-- One logical task at a time. State the directory, give exact commands, give the test
-  command after each change, and wait for output when it affects the next step.
-- Prefer editing existing working code over rewriting it.
-- Never claim something works without a test. Never invent test results.
-- Flag scope creep and timeline risk honestly. Do not silently expand scope.
+- One logical task at a time. Prefer editing existing working code over rewriting it.
+- Never claim something works without running the tests, and never invent results:
+  - mobile: `npm run typecheck`, `npm run lint`, `npm run test:unit` in `apps/mobile`
+  - database: `supabase/tests/sql/run.sh` (throwaway PostgreSQL 17)
+  - Edge Functions: `deno check` and `deno lint` in `supabase/functions`
+- Passing tests do not prove layout or navigation. Say what needs checking on a device.
+- Do not expand scope silently; flag anything outside the task.
 
-## Product rules the database must enforce (not just the UI)
-- Roles: collector, site_manager, recycler, admin. RLS on every table; explicit GRANTs
-  are needed because automatic table exposure is disabled on the project.
-- Users can be assigned to multiple sites via `user_sites` (admin-managed). 8 real sites (see migration 005); admins add more later.
-- Materials are rows in the `materials` lookup table (not an enum or hardcoded list), with
-  `is_reportable`, `is_verifiable`, `is_recycler_visible` and `is_active` flags, so types can be
-  added later. PET, PP, HDPE, LDPE and PLASTIC_BAGS are reportable, verifiable and
-  recycler-visible. MIXED is reportable by collectors but can never be used in a verified
-  breakdown or shown to recyclers. OTHER/residue stays excluded pending Chemolex confirmation.
-- Collector-reported weight and site-manager-verified weight are separate fields.
-  Collector weight must never determine payout. Only approved + verified collections
-  are payment-eligible. Status changes and verified weight go through a server-side
-  RPC only; clients get no direct UPDATE on collections.
-- Rejection requires a reason. Keep an audit trail (who, when).
-- Offline: client-generated UUID per collection as idempotency key (unique constraint),
-  photos stored locally until sync, retry-safe uploads. No advanced conflict resolution.
-- Payment gateway / M-Pesa is out of scope; only record eligibility/status.
+## Product rules
+Operating model: each waste picker belongs to one collection group (site); site
+managers may cover several sites. Assignments live in `user_sites` and are admin-managed.
+
+Enforce these in the database, not only in the UI:
+- Roles: collector, site_manager, recycler, admin. RLS on every table, with explicit
+  GRANTs (automatic table exposure is disabled on the project).
+- Sites and materials are lookup tables, never hardcoded lists. Materials carry
+  `is_reportable`, `is_verifiable`, `is_recycler_visible` and `is_active`. MIXED may be
+  reported by collectors but never used in a verified breakdown or shown to recyclers.
+- Collector-reported weight and manager-verified weight are separate fields. Collector
+  weight never determines payment. Only approved, verified deliveries are payment-eligible.
+- Status changes and verified weights go through server-side RPCs only; clients get no
+  direct UPDATE on collections. Rejection requires a reason. Keep an audit trail (who, when).
+- Offline: a client-generated UUID per delivery is the idempotency key (unique
+  constraint); photos stay on the phone until synced; uploads are retry-safe.
+- Payments are out of scope: record eligibility and status only.
 
 ## Invitations
-- Admin-only, via Edge Function. 7-day expiry. Atomic DB changes; old invitation can
-  never be accepted.
-- Reissue requires an inactive profile and no accepted invitation. Email confirmation
-  is not the test, because a failed acceptance can leave a confirmed but inactive user.
-- Do NOT assume `auth.admin.generateLink({ type: "invite" })` or `inviteUserByEmail`
-  works for an existing Auth user — verify empirically on the local stack first.
-- Supabase's built-in email only reaches project team members. Real invites need
-  custom SMTP (planned: Resend, once a domain is verified).
+- Admin-only, through the `invite-user` Edge Function. Codes expire after 7 days and are
+  activated through `accept-invitation`. An old or revoked code can never be accepted.
+- Reissue requires an inactive profile and no accepted invitation. Database changes are atomic.
+- Codes are shared by WhatsApp or SMS. The app sends no email; real email needs custom SMTP.
 
-## Known issues found in review (pushed commit ac7c20e)
-- README mentions 6 sites, SME groups and Mapbox; the agreed brief has 9 sites and no SME groups or maps. Confirm with Chemolex before building them.
-
-## Migration policy
-- Before the first database deployment, existing migrations (currently 001–004) may be edited in place while the schema is still under development.
-- Before editing an existing migration, verify that it has not been applied to any relevant local or remote database.
-- Once the first migration is deployed to takalex-development, freeze all existing migration files permanently.
-- After that first deployment, every schema change must be introduced through a new migration. Never edit or rewrite an applied migration.
+## Migrations
+- Migrations 001–008 are deployed to the hosted project and frozen. Never edit an
+  applied migration.
+- Every schema change is a new numbered migration, tested locally (`supabase db reset`)
+  and through the SQL suites before the maintainer deploys it.
 
 ## Privilege rules
-- Edge Functions: `verify_jwt` only proves a valid project key (the public anon key passes it). Any function that needs a user must itself require `Authorization: Bearer`, call `getUser()` with that token, and check the role (e.g. `is_active_admin()`) before using the service-role client.
-- PostgreSQL's built-in PUBLIC EXECUTE default on new functions is not overridden; every new
-  function must REVOKE/GRANT explicitly beside its definition, and 60_privileges fails if one
-  doesn't.
-- Edge Functions using service_role must select explicit columns and use return-minimal
+- `verify_jwt` only proves a valid project key. A function that needs a user must require
+  `Authorization: Bearer`, call `getUser()` with that token and check the role (for example
+  `is_active_admin()`) before using the service-role client.
+- Every new SQL function must REVOKE/GRANT EXECUTE explicitly beside its definition;
+  the privilege test suite fails otherwise.
+- Edge Functions using the service role select explicit columns and use return-minimal
   updates; `select('*')` and bare `.select()` are denied on invitations and access_requests.
 
+## Navigation
+- Several routes resolve to `/`: `app/index.tsx` and each role group's index. Never
+  redirect to `/` from inside a role group; it resolves back into the same group and loops.
+  `RoleGate` sends users who are not allowed to `/(auth)/login`.
+
 ## Layout
-- apps/mobile/src/app — Expo Router routes: public pages, (auth), (collector), (admin), auth/callback
-- apps/mobile/src/stores/authStore.ts — Zustand auth state
-- apps/mobile/src/lib — supabase client, secure storage, access/sites helpers
-- supabase/migrations — 001..004; editing rules in "Migration policy" above
-- supabase/functions/invite-user — admin invite Edge Function (create/reissue, code-based)
-- supabase/scripts/dev-admin.sh — local-only first-admin bootstrap
+- `apps/mobile/src/app`: Expo Router routes. Public: `index` (landing), `request-access`.
+  `(auth)`: login, activate. Role areas: `(collector)`, `(manager)`, `(admin)`, `(recycler)`.
+- `apps/mobile/src/components`: shared UI (`Ui.tsx`, `RoleGate`, `Landing`, `StatusBadge`, …).
+- `apps/mobile/src/lib`: Supabase client (with request timeout), `outbox/` (offline
+  deliveries and sync), `review/`, `recycler/`, `admin/`. Auth state: `src/stores/authStore.ts`.
+- `supabase/migrations`, `supabase/functions` (`invite-user`, `accept-invitation`, `_shared`),
+  `supabase/tests`, `supabase/scripts/dev-admin.sh` (local first admin only, by design).
+- Android builds: EAS profile `preview` in `apps/mobile/eas.json`; build-time values come
+  from EAS environment variables, not from `.env`.
