@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 
-import { Message, uiColors } from "@/components/Ui";
+import { Message, uiColors, uiStyles } from "@/components/Ui";
 import { formatTotalKg, hasAnyMaterial, totalKg, type MaterialTotal } from "@/lib/recycler/model";
 
 export type TotalsState =
@@ -60,16 +60,9 @@ export function MaterialTotalsCard({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 8,
-    padding: 14,
-  },
-  heading: { color: uiColors.text, fontSize: 17, fontWeight: "700" },
-  note: { color: uiColors.muted, fontSize: 13, lineHeight: 18 },
+  card: uiStyles.card,
+  heading: uiStyles.sectionHeading,
+  note: uiStyles.meta,
   updating: { color: uiColors.muted, fontSize: 13, fontStyle: "italic" },
   dimmed: { opacity: 0.4 },
   row: {

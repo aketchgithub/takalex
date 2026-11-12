@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { ComponentRef, PropsWithChildren, RefObject } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -10,7 +10,7 @@ import {
   View,
   type TextInputProps,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { OFFLINE_NOTICE } from "@/lib/authResolution";
 import { useAuthStore } from "@/stores/authStore";
@@ -25,31 +25,64 @@ const colors = {
   white: "#ffffff",
 };
 
+export type ScreenScrollView = ComponentRef<typeof ScrollView>;
+
+// One spacing scale for every screen.
+export const uiSpace = { xs: 8, sm: 12, md: 16, lg: 24 } as const;
+
+// A page under a navigation header: the header already covers the top inset.
+const UNDER_HEADER_EDGES: Edge[] = ["left", "right", "bottom"];
+
 // onRefresh (optional) turns on pull to refresh; refreshing shows the
 // spinner while the reload runs.
+// align: "center" (default; login, activate, public pages) or "top" (signed-in
+// screens). brand={false} hides the TAKALEX line on pages that sit under a
+// navigation header, which then is the one title area; title may be left out
+// there when the header already says it.
 export function Screen({
+  align = "center",
+  brand = true,
   children,
   subtitle,
   title,
   refreshing = false,
   onRefresh,
-}: PropsWithChildren<{ title: string; subtitle?: string; refreshing?: boolean; onRefresh?: () => void }>) {
+  scrollRef,
+  topLink,
+}: PropsWithChildren<{
+  // A link above the TAKALEX line, e.g. "‹ Back to home" on the public forms.
+  topLink?: { label: string; onPress: () => void };
+  // Lets a screen scroll itself, e.g. back to the top.
+  scrollRef?: RefObject<ScreenScrollView | null>;
+  align?: "center" | "top";
+  brand?: boolean;
+  title?: string;
+  subtitle?: string;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}>) {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={brand ? undefined : UNDER_HEADER_EDGES} style={styles.safeArea}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, align === "top" ? styles.contentTop : null]}
         keyboardShouldPersistTaps="handled"
+        ref={scrollRef}
         refreshControl={
           onRefresh ? (
             <RefreshControl colors={[colors.primary]} onRefresh={onRefresh} refreshing={refreshing} tintColor={colors.primary} />
           ) : undefined
         }
       >
-        <Text style={styles.brand}>TAKALEX</Text>
+        {topLink ? (
+          <View style={styles.topLink}>
+            <InlineLink label={topLink.label} large onPress={topLink.onPress} />
+          </View>
+        ) : null}
+        {brand ? <Text style={styles.brand}>TAKALEX</Text> : null}
         <OfflineNotice />
-        <Text style={styles.title}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        <View style={styles.body}>{children}</View>
+        {title ? <Text style={styles.title}>{title}</Text> : null}
+        {subtitle ? <Text style={[styles.subtitle, title ? null : styles.subtitleAlone]}>{subtitle}</Text> : null}
+        <View style={[styles.body, title || subtitle ? null : styles.bodyAlone]}>{children}</View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -188,13 +221,56 @@ export function InlineLink({
   onPress: () => void;
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={[styles.link, large ? styles.linkLarge : null]}>
+    <Pressable
+      accessibilityRole="button"
+      hitSlop={large ? undefined : LINK_HIT_SLOP}
+      onPress={onPress}
+      style={[styles.link, large ? styles.linkLarge : null]}
+    >
       <Text style={[styles.linkText, large ? styles.linkTextLarge : null]}>{label}</Text>
     </Pressable>
   );
 }
 
+// The default link is about 32dp tall; this makes its touch area 48dp.
+const LINK_HIT_SLOP = { bottom: 8, top: 8 };
+
 export const uiColors = colors;
+
+// Shared pieces so cards, section headings and field labels look the same on
+// every screen.
+export const uiStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: uiSpace.xs,
+    padding: uiSpace.md,
+  },
+  sectionHeading: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  cardTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  fieldLabel: { color: colors.text, fontSize: 14, fontWeight: "600" },
+  meta: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  // Label above its chips or input.
+  fieldGroup: { gap: uiSpace.xs },
+  // Heading above a list of cards.
+  section: { gap: uiSpace.sm },
+  // Selectable chip: 48dp touch target.
+  chip: {
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: uiSpace.md,
+  },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  chipTextSelected: { color: colors.white },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: uiSpace.xs },
+});
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -205,6 +281,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: "center",
     padding: 24,
+  },
+  topLink: {
+    marginBottom: 8,
+  },
+  contentTop: {
+    justifyContent: "flex-start",
+  },
+  subtitleAlone: {
+    marginTop: 0,
+  },
+  bodyAlone: {
+    marginTop: 0,
   },
   brand: {
     color: colors.primary,
@@ -242,7 +330,7 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   field: {
-    gap: 7,
+    gap: 8,
   },
   label: {
     color: colors.text,
@@ -299,7 +387,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.5,
     justifyContent: "center",
-    minHeight: 44,
+    minHeight: 48,
     paddingHorizontal: 16,
   },
   secondaryButtonLarge: {

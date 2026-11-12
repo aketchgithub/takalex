@@ -3,7 +3,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { AccountSummary } from "@/components/AccountSummary";
-import { InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
+import { InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiStyles } from "@/components/Ui";
 import { syncNow } from "@/lib/outbox";
 import { deliveries, syncNowOutcome, type Notice } from "@/lib/outbox/presentation";
 import { useWaitingDeliveries } from "@/lib/outbox/useWaitingDeliveries";
@@ -30,6 +30,7 @@ export default function CollectorHome() {
 
   return (
     <Screen
+      align="top"
       title={`Hello${profile?.full_name ? `, ${profile.full_name}` : ""}`}
       subtitle="Your collector account."
     >
@@ -56,13 +57,6 @@ export default function CollectorHome() {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 10,
-    padding: 14,
-  },
-  count: { color: uiColors.text, fontSize: 17, fontWeight: "700" },
+  card: { ...uiStyles.card, gap: 12 },
+  count: uiStyles.sectionHeading,
 });

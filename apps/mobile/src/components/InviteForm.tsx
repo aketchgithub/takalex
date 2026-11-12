@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { z } from "zod";
 
-import { Field, Message, PrimaryButton, uiColors } from "@/components/Ui";
+import { Field, Message, PrimaryButton, uiColors, uiStyles } from "@/components/Ui";
 import { NO_EMAIL_NOTE, requestEmailError, type InvitePrefill } from "@/lib/admin/model";
 import { getActiveSites, type SiteOption } from "@/lib/sites";
 import { roleLabels, type InviteRole } from "@/types/auth";
@@ -241,9 +241,9 @@ export function InviteForm({
 }
 
 const styles = StyleSheet.create({
-  section: { gap: 10 },
-  sectionTitle: { color: uiColors.text, fontSize: 16, fontWeight: "700" },
-  helper: { color: uiColors.muted, fontSize: 13, lineHeight: 19 },
+  section: uiStyles.fieldGroup,
+  sectionTitle: uiStyles.sectionHeading,
+  helper: uiStyles.meta,
   option: {
     alignItems: "center",
     backgroundColor: uiColors.white,
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: 14,
+    padding: 16,
   },
   optionSelected: { borderColor: uiColors.primary, borderWidth: 2 },
   optionContent: { flex: 1, gap: 4 },
@@ -265,11 +265,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: uiColors.white,
     borderColor: uiColors.border,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     flexDirection: "row",
     gap: 12,
-    padding: 13,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   siteOptionSelected: { borderColor: uiColors.primary },
   checkbox: {
@@ -284,5 +286,5 @@ const styles = StyleSheet.create({
   checkboxSelected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
   checkmark: { color: uiColors.white, fontSize: 14, fontWeight: "800" },
   siteName: { color: uiColors.text, flex: 1, fontSize: 14, fontWeight: "500" },
-  selectionCount: { color: uiColors.muted, fontSize: 12 },
+  selectionCount: { color: uiColors.muted, fontSize: 13 },
 });

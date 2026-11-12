@@ -4,6 +4,7 @@ import { Text } from "react-native";
 
 import { AccountSummary } from "@/components/AccountSummary";
 import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { DeliveryStatusRow } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen } from "@/components/Ui";
 import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
 import { listPendingDeliveries, type ManagerDelivery } from "@/lib/review/api";
@@ -51,6 +52,7 @@ export default function PendingDeliveriesScreen() {
 
   return (
     <Screen
+      align="top"
       title={`Hello${profile?.full_name ? `, ${profile.full_name}` : ""}`}
       subtitle="Deliveries waiting for your review, newest first."
     >
@@ -80,6 +82,7 @@ export default function PendingDeliveriesScreen() {
               </Text>
               <Row label="Reported material" value={delivery.materialName ?? delivery.materialCode} />
               <Row label="Reported weight" value={formatKg(delivery.reportedWeightKg)} />
+              <DeliveryStatusRow status={delivery.status} rejectionReason={null} />
             </Card>
           ))
         : null}

@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
-import { deliveryStatusLabel, formatDateTime, formatKg } from "@/lib/outbox/presentation";
+import { DeliveryStatusRow } from "@/components/StatusBadge";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
 import {
   fetchVerifiableMaterials,
   getDeliveryDetail,
@@ -31,7 +32,7 @@ export default function DeliveryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   if (!id) {
     return (
-      <Screen title="Delivery">
+      <Screen align="top" brand={false}>
         <Message tone="error">No delivery was selected.</Message>
       </Screen>
     );
@@ -73,14 +74,14 @@ function DeliveryContent({ id }: { id: string }) {
 
   if (detail.status === "loading") {
     return (
-      <Screen title="Delivery">
+      <Screen align="top" brand={false}>
         <Message>Loading the delivery…</Message>
       </Screen>
     );
   }
   if (detail.status === "error") {
     return (
-      <Screen title="Delivery">
+      <Screen align="top" brand={false}>
         <Message tone="error">{detail.message}</Message>
         <InlineLink label="Try again" onPress={() => setVersion((v) => v + 1)} />
         <InlineLink label="Back" onPress={goBack} />
@@ -89,7 +90,7 @@ function DeliveryContent({ id }: { id: string }) {
   }
   if (detail.status === "missing") {
     return (
-      <Screen title="Delivery">
+      <Screen align="top" brand={false}>
         <Message tone="error">This delivery was not found, or it is not at one of your sites.</Message>
         <InlineLink label="Back" onPress={goBack} />
       </Screen>
@@ -98,9 +99,9 @@ function DeliveryContent({ id }: { id: string }) {
 
   const delivery = detail.delivery;
   return (
-    <Screen title={collectorLabel(delivery.collectorName)} subtitle={delivery.siteName ?? "Unknown site"}>
+    <Screen align="top" brand={false} title={collectorLabel(delivery.collectorName)} subtitle={delivery.siteName ?? "Unknown site"}>
       <Card>
-        <Row label="Status" value={deliveryStatusLabel(delivery.status, delivery.rejectionReason)} />
+        <DeliveryStatusRow status={delivery.status} rejectionReason={delivery.rejectionReason} />
         <Row label="Submitted to Takalex" value={formatDateTime(delivery.submittedAt)} />
         {delivery.verifiedAt ? <Row label="Reviewed" value={formatDateTime(delivery.verifiedAt)} /> : null}
       </Card>
@@ -108,8 +109,8 @@ function DeliveryContent({ id }: { id: string }) {
       <View style={reviewStyles.section}>
         <SectionHeading note="Reported by collector. Not verified.">Reported by collector</SectionHeading>
         <Card>
-          <Row label="Material (reported by collector)" value={delivery.materialName ?? delivery.materialCode} />
-          <Row label="Weight (reported by collector)" value={formatKg(delivery.reportedWeightKg)} />
+          <Row label="Material" value={delivery.materialName ?? delivery.materialCode} />
+          <Row label="Weight" value={formatKg(delivery.reportedWeightKg)} />
         </Card>
       </View>
 
@@ -117,11 +118,12 @@ function DeliveryContent({ id }: { id: string }) {
         <SectionHeading note="Recorded by the collector's phone. Not verified.">Device-reported</SectionHeading>
         <Card>
           <Row
-            label="Capture time (device-reported)"
+            label="Capture time"
             value={delivery.capturedAt ? formatDateTime(delivery.capturedAt) : "Not recorded"}
           />
           <Row
-            label="Location (device-reported)"
+            label="Location"
+            stacked
             value={deviceLocationLabel(delivery.deviceLatitude, delivery.deviceLongitude, delivery.deviceAccuracyM)}
           />
         </Card>
@@ -397,7 +399,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
         ) : null}
       </View>
 
-      <View style={reviewStyles.section}>
+      <View style={styles.rejectCard}>
         <SectionHeading note="A rejected delivery is not eligible for payment. The collector sees the reason.">
           Or reject
         </SectionHeading>
@@ -435,19 +437,14 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   lineHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  label: { color: uiColors.text, fontSize: 14, fontWeight: "600" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  chipSelected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
+  label: uiStyles.fieldLabel,
+  chips: uiStyles.chipRow,
+  chip: uiStyles.chip,
+  chipSelected: uiStyles.chipSelected,
   chipDisabled: { opacity: 0.4 },
-  chipText: { color: uiColors.text, fontSize: 14, fontWeight: "600" },
-  chipTextSelected: { color: uiColors.white },
+  chipText: uiStyles.chipText,
+  chipTextSelected: uiStyles.chipTextSelected,
+  // Rejecting is its own card, set apart from the approve section above.
+  rejectCard: { ...uiStyles.card, borderColor: uiColors.danger, gap: 12, marginTop: 8 },
   error: { color: uiColors.danger, fontSize: 14 },
 });

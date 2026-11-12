@@ -55,18 +55,18 @@ function ApproveContent({ id }: { id: string }) {
   };
 
   if (issued) {
-    return <InvitationCodeCard issued={issued} title="Request approved" onDone={back} />;
+    return <InvitationCodeCard brand={false} issued={issued} title="Request approved" onDone={back} />;
   }
   if (load.status === "loading") {
     return (
-      <Screen title="Approve and invite">
+      <Screen align="top" brand={false}>
         <Message>Loading the request…</Message>
       </Screen>
     );
   }
   if (load.status === "error" || !load.request) {
     return (
-      <Screen title="Approve and invite">
+      <Screen align="top" brand={false}>
         <Message tone="error">{load.status === "error" ? load.message : "This access request was not found."}</Message>
         <InlineLink label="Back to access requests" onPress={back} />
       </Screen>
@@ -76,7 +76,7 @@ function ApproveContent({ id }: { id: string }) {
   const request = load.request;
   if (!isOpenRequest(request.status)) {
     return (
-      <Screen title="Approve and invite">
+      <Screen align="top" brand={false}>
         <Message>This request has already been {request.status}.</Message>
         <InlineLink label="Back to access requests" onPress={back} />
       </Screen>
@@ -85,14 +85,14 @@ function ApproveContent({ id }: { id: string }) {
 
   return (
     <Screen
-      title="Approve and invite"
+      align="top"
+      brand={false}
       subtitle={`${request.fullName} asked to join as ${roleLabels[request.role].toLowerCase()} (${groupLabel(
         request.role,
         request.siteName,
         request.siteId,
       )}). Contact: ${contactLabel(request.email, request.phone)}. Check the details; every field can be changed.`}
     >
-      <InlineLink label="‹ Back" onPress={back} />
       <InviteForm
         initial={invitePrefill(request)}
         request={{ email: request.email }}

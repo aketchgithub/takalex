@@ -21,10 +21,13 @@ export type IssuedInvitation = {
 export function InvitationCodeCard({
   issued,
   title = "Invitation created",
+  brand = true,
   onDone,
 }: {
   issued: IssuedInvitation;
   title?: string;
+  // false on a page under a navigation header (see Screen).
+  brand?: boolean;
   onDone: () => void;
 }) {
   const [shareError, setShareError] = useState<string | null>(null);
@@ -46,7 +49,7 @@ export function InvitationCodeCard({
   }
 
   return (
-    <Screen title={title} subtitle={`For ${issued.email} (${roleLabels[issued.role]}).`}>
+    <Screen align="top" brand={brand} title={title} subtitle={`For ${issued.email} (${roleLabels[issued.role]}).`}>
       <View style={styles.codeCard}>
         <Text style={styles.codeLabel}>Invitation code</Text>
         <Text selectable style={styles.code}>{issued.code}</Text>
@@ -77,10 +80,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: uiColors.white,
     borderColor: uiColors.primary,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 2,
     gap: 8,
-    padding: 20,
+    padding: 24,
   },
   codeLabel: { color: uiColors.muted, fontSize: 13, fontWeight: "600" },
   code: {

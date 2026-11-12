@@ -4,6 +4,7 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
 import { Card, Row, reviewStyles } from "@/components/ReviewUi";
+import { REQUEST_TONES, StatusRow } from "@/components/StatusBadge";
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
 import {
   REQUEST_FILTERS,
@@ -52,7 +53,7 @@ export default function AccessRequestsScreen() {
   const rows = list.status === "ready" ? filterRequests(list.rows, filter) : [];
 
   return (
-    <Screen title="Access requests" subtitle="Newest first. Approve a request to invite the person, or reject it with a note.">
+    <Screen align="top" title="Access requests" subtitle="Newest first. Approve a request to invite the person, or reject it with a note.">
       <FilterChips options={REQUEST_FILTERS} value={filter} onChange={setFilter} />
 
       {list.status === "loading" ? <Message>Loading access requests…</Message> : null}
@@ -76,6 +77,12 @@ export default function AccessRequestsScreen() {
       <InlineLink label="Refresh" onPress={reload} />
     </Screen>
   );
+}
+
+// Email and phone on separate lines (contactLabel's wording when neither is set).
+function contactLines(email: string | null, phone: string | null): string {
+  const lines = [email?.trim(), phone?.trim()].filter((line): line is string => Boolean(line));
+  return lines.length ? lines.join("\n") : contactLabel(email, phone);
 }
 
 function RequestCard({
@@ -120,11 +127,11 @@ function RequestCard({
     <Card>
       <Text style={reviewStyles.title}>{request.fullName}</Text>
       <Text style={reviewStyles.meta}>Submitted {formatDateTime(request.createdAt)}</Text>
-      <Row label="Contact" value={contactLabel(request.email, request.phone)} />
+      <Row label="Contact" stacked value={contactLines(request.email, request.phone)} />
       <Row label="Requested role" value={roleLabels[request.role]} />
       <Row label={request.role === "collector" ? "Group (site)" : "Site"} value={groupLabel(request.role, request.siteName, request.siteId)} />
-      <Row label="Status" value={requestStatusLabel(request.status)} />
-      {request.notes ? <Row label="Note" value={request.notes} /> : null}
+      <StatusRow label={requestStatusLabel(request.status)} tone={REQUEST_TONES[request.status]} />
+      {request.notes ? <Row label="Note" stacked value={request.notes} /> : null}
       {open && !request.email ? (
         <Text style={styles.warning}>No email on this request: you will confirm one with the requester by phone.</Text>
       ) : null}
@@ -166,6 +173,6 @@ function RequestCard({
 }
 
 const styles = StyleSheet.create({
-  actions: { gap: 10, marginTop: 6 },
+  actions: { gap: 12, marginTop: 8 },
   warning: { color: uiColors.danger, fontSize: 13, lineHeight: 18 },
 });

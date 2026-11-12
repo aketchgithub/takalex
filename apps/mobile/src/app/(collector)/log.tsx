@@ -10,7 +10,9 @@ import {
   PrimaryButton,
   Screen,
   SecondaryButton,
+  type ScreenScrollView,
   uiColors,
+  uiStyles,
 } from "@/components/Ui";
 import { loadCollectorContext, type CollectorContext } from "@/lib/collectorContext";
 import { getOutboxRow, saveSubmission } from "@/lib/outbox";
@@ -40,8 +42,17 @@ export default function NewDeliveryScreen() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const submitting = useRef(false);
   const latestSubmission = useRef(0);
+  // The submission whose result card the collector has already moved on from.
+  const dismissedSubmission = useRef(0);
 
   const location = useDeliveryLocation();
+
+  // The result of a submit is shown at the top of the form.
+  const scrollRef = useRef<ScreenScrollView | null>(null);
+  const showNotice = (next: Notice) => {
+    setNotice(next);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -58,6 +69,14 @@ export default function NewDeliveryScreen() {
     };
   }, [profile, contextVersion]);
 
+  // Starting the next delivery clears the previous result card (an error
+  // stays). A late "uploaded" result for that delivery is then not shown
+  // again; a late failure still is.
+  const startNext = () => {
+    dismissedSubmission.current = latestSubmission.current;
+    setNotice((current) => (current && current.tone !== "error" ? null : current));
+  };
+
   const onCaptured = useCallback((captured: CapturedPhoto) => {
     setPhoto((previous) => {
       if (previous) deleteTemporaryPhoto(previous.uri);
@@ -65,6 +84,11 @@ export default function NewDeliveryScreen() {
     });
     setCameraOpen(false);
   }, []);
+
+  const openCamera = () => {
+    startNext();
+    setCameraOpen(true);
+  };
 
   const site = context?.site ?? null;
   // Only a material that is currently offered counts as selected.
@@ -96,7 +120,7 @@ export default function NewDeliveryScreen() {
         photoUri: photo.uri,
       });
     } catch (error: unknown) {
-      setNotice({
+      showNotice({
         tone: "error",
         text: error instanceof Error ? error.message : "The delivery could not be saved. Try again.",
       });
@@ -108,7 +132,7 @@ export default function NewDeliveryScreen() {
 
     // Safely on the phone: clear the form for the next delivery, then report
     // the upload result (unless a newer delivery has been saved since).
-    setNotice({ tone: "info", text: "Saved on this phone, uploading…" });
+    showNotice({ tone: "info", text: "Saved on this phone, uploading…" });
     setPhoto(null);
     setWeight("");
     setMaterialCode(null);
@@ -116,12 +140,14 @@ export default function NewDeliveryScreen() {
 
     const summary = await saved.sync;
     const row = await getOutboxRow(saved.row.clientRecordId).catch(() => null);
-    if (latestSubmission.current === submissionId) setNotice(submitOutcome(summary, row));
+    if (latestSubmission.current !== submissionId) return;
+    const outcome = submitOutcome(summary, row);
+    if (dismissedSubmission.current !== submissionId || outcome.tone === "error") setNotice(outcome);
   };
 
   if (!context) {
     return (
-      <Screen title="New delivery" subtitle="Collector account">
+      <Screen align="top" title="New delivery" subtitle="Collector account">
         {contextError ? (
           <>
             <Message tone="error">{contextError}</Message>
@@ -141,7 +167,19 @@ export default function NewDeliveryScreen() {
   }
 
   return (
-    <Screen title="New delivery" subtitle="Record what you delivered, then take a photo of it.">
+    <Screen
+      align="top"
+      scrollRef={scrollRef}
+      title="New delivery"
+      subtitle="Record what you delivered, then take a photo of it."
+    >
+      {notice ? (
+        <View style={[styles.noticeCard, notice.tone === "error" ? styles.noticeCardError : null]}>
+          <Message tone={notice.tone}>{notice.text}</Message>
+          <InlineLink label="View history" onPress={() => router.push("/(collector)/history")} />
+        </View>
+      ) : null}
+
       <View style={styles.card}>
         <Text style={styles.label}>Site</Text>
         {site ? (
@@ -169,7 +207,10 @@ export default function NewDeliveryScreen() {
                   key={material.code}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: selected }}
-                  onPress={() => setMaterialCode(material.code)}
+                  onPress={() => {
+                    startNext();
+                    setMaterialCode(material.code);
+                  }}
                   style={[styles.option, selected ? styles.optionSelected : null]}
                 >
                   <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>
@@ -189,6 +230,7 @@ export default function NewDeliveryScreen() {
         value={weight}
         error={weightError}
         onChangeText={(text) => {
+          startNext();
           setWeight(text);
           setWeightError(undefined);
         }}
@@ -206,10 +248,10 @@ export default function NewDeliveryScreen() {
               source={{ uri: photo.uri }}
               style={[styles.preview, { aspectRatio: photo.width / photo.height || 0.75 }]}
             />
-            <SecondaryButton label="Retake" onPress={() => setCameraOpen(true)} />
+            <SecondaryButton label="Retake" onPress={openCamera} />
           </>
         ) : (
-          <SecondaryButton label="Take photo" onPress={() => setCameraOpen(true)} />
+          <SecondaryButton label="Take photo" onPress={openCamera} />
         )}
         <Text style={styles.hint}>{locationMessage(location.state)}</Text>
       </View>
@@ -220,15 +262,8 @@ export default function NewDeliveryScreen() {
         disabled={!canSubmit}
         onPress={() => void submit()}
       />
-      {!photo || !materialCode ? (
+      {(!photo || !materialCode) && (!notice || notice.tone === "error") ? (
         <Text style={styles.hint}>Choose a material, enter the weight and take a photo to submit.</Text>
-      ) : null}
-
-      {notice ? (
-        <View style={styles.section}>
-          <Message tone={notice.tone}>{notice.text}</Message>
-          <InlineLink label="View history" onPress={() => router.push("/(collector)/history")} />
-        </View>
       ) : null}
 
       <EvidenceCamera visible={cameraOpen} onCaptured={onCaptured} onCancel={() => setCameraOpen(false)} />
@@ -237,30 +272,18 @@ export default function NewDeliveryScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 4,
-    padding: 14,
-  },
-  section: { gap: 8 },
-  label: { color: uiColors.text, fontSize: 14, fontWeight: "600" },
-  value: { color: uiColors.text, fontSize: 17, fontWeight: "700" },
-  hint: { color: uiColors.muted, fontSize: 13, lineHeight: 19 },
-  options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  option: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  optionSelected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
-  optionText: { color: uiColors.text, fontSize: 15, fontWeight: "600" },
-  optionTextSelected: { color: uiColors.white },
+  card: uiStyles.card,
+  // Saved or uploaded: green card. A failure: red border.
+  noticeCard: { ...uiStyles.card, backgroundColor: "#e3f1e7", borderColor: uiColors.primary, borderWidth: 1.5 },
+  noticeCardError: { backgroundColor: uiColors.white, borderColor: uiColors.danger },
+  section: uiStyles.fieldGroup,
+  label: uiStyles.fieldLabel,
+  value: uiStyles.sectionHeading,
+  hint: uiStyles.meta,
+  options: uiStyles.chipRow,
+  option: uiStyles.chip,
+  optionSelected: uiStyles.chipSelected,
+  optionText: uiStyles.chipText,
+  optionTextSelected: uiStyles.chipTextSelected,
   preview: { backgroundColor: uiColors.border, borderRadius: 12, width: "100%" },
 });

@@ -1,8 +1,10 @@
 import { Tabs } from "expo-router";
 
+import { renderTextTabBar } from "@/components/TextTabBar";
+
 export default function AdminTabsLayout() {
   return (
-    <Tabs screenOptions={{ headerShown: true }}>
+    <Tabs screenOptions={{ headerShown: false }} tabBar={renderTextTabBar}>
       <Tabs.Screen name="index" options={{ title: "Overview" }} />
       <Tabs.Screen name="access-requests" options={{ title: "Access" }} />
       <Tabs.Screen name="invitations" options={{ title: "Invitations" }} />

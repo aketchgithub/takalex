@@ -121,6 +121,7 @@ export default function RequestAccessScreen() {
 
   return (
     <Screen
+      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
       title="Request access"
       subtitle="Public discovery is open, but operational access is controlled through a verified invitation flow."
     >
@@ -252,7 +253,7 @@ export default function RequestAccessScreen() {
         loading={loading}
         onPress={() => void submit()}
       />
-      <PrimaryButton label="Back to home" onPress={() => router.replace("/")} />
+      <PrimaryButton label="Back to home" onPress={() => router.dismissTo("/")} />
     </Screen>
   );
 }

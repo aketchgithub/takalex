@@ -37,6 +37,7 @@ export default function LoginScreen() {
 
   return (
     <Screen
+      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
       title="Welcome back"
       subtitle="Sign in to your Takalex account."
     >

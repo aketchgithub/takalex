@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { Message, PrimaryButton, uiColors } from "@/components/Ui";
+import { Message, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
 import {
   collectorGroupLabel,
   loadAccountSummary,
@@ -93,7 +93,7 @@ export function AccountSummary({
         </View>
       ) : null}
 
-      <PrimaryButton label="Sign out" loading={isSigningOut} onPress={() => void signOut()} />
+      <SecondaryButton label="Sign out" loading={isSigningOut} onPress={() => void signOut()} />
     </View>
   );
 }
@@ -108,14 +108,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 14,
-    padding: 16,
-  },
+  card: { ...uiStyles.card, gap: 12 },
   row: {
     gap: 2,
   },

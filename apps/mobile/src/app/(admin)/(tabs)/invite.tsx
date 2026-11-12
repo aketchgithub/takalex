@@ -26,6 +26,7 @@ export default function InviteUserScreen() {
 
   return (
     <Screen
+      align="top"
       title="Invite a team member"
       subtitle="Choose the person's role and sites. You will get a one-time code to pass on to them."
     >

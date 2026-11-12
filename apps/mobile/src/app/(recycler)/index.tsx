@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { AccountSummary } from "@/components/AccountSummary";
 import { FilterChips } from "@/components/FilterChips";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
-import { InlineLink, Message, Screen, uiColors } from "@/components/Ui";
+import { InlineLink, Message, Screen, uiStyles } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
 import { DATE_PRESETS, presetRange, rangeLabel, totalsHeading, type DatePreset } from "@/lib/recycler/model";
 import { useMaterialTotals } from "@/lib/recycler/useMaterialTotals";
@@ -57,6 +57,7 @@ export default function RecyclerHome() {
 
   return (
     <Screen
+      align="top"
       title={`Hello${profile?.full_name ? `, ${profile.full_name}` : ""}`}
       subtitle="Sorted material approved and weighed at Chemolex sites."
       refreshing={totals.refreshing}
@@ -97,7 +98,7 @@ export default function RecyclerHome() {
 }
 
 const styles = StyleSheet.create({
-  filters: { gap: 8 },
-  label: { color: uiColors.text, fontSize: 14, fontWeight: "700" },
-  hint: { color: uiColors.muted, fontSize: 12 },
+  filters: uiStyles.fieldGroup,
+  label: uiStyles.fieldLabel,
+  hint: uiStyles.meta,
 });

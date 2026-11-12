@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Text } from "react-native";
 
 import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { DeliveryStatusRow } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen } from "@/components/Ui";
-import { deliveryStatusLabel, formatDateTime, formatKg } from "@/lib/outbox/presentation";
+import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
 import { listReviewedDeliveries, type ReviewedDelivery } from "@/lib/review/api";
 import { collectorLabel } from "@/lib/review/model";
 import { useManagerSites } from "@/lib/review/useManagerSites";
@@ -46,7 +47,7 @@ export default function ReviewedDeliveriesScreen() {
   }, [sites, managerId]);
 
   return (
-    <Screen title="Reviewed" subtitle="Deliveries you have approved or rejected. Reviews are final.">
+    <Screen align="top" title="Reviewed" subtitle="Deliveries you have approved or rejected. Reviews are final.">
       <SectionHeading>Reviewed by you</SectionHeading>
       {sites.status === "error" ? <Message tone="error">{sites.message}</Message> : null}
       {list.status === "loading" && sites.status !== "error" ? <Message>Loading…</Message> : null}
@@ -68,7 +69,7 @@ export default function ReviewedDeliveriesScreen() {
                 {delivery.siteName ?? "Unknown site"} · submitted {formatDateTime(delivery.submittedAt)}
                 {delivery.verifiedAt ? ` · reviewed ${formatDateTime(delivery.verifiedAt)}` : ""}
               </Text>
-              <Row label="Status" value={deliveryStatusLabel(delivery.status, delivery.rejectionReason)} />
+              <DeliveryStatusRow status={delivery.status} rejectionReason={delivery.rejectionReason} />
               <Row
                 label="Reported by collector"
                 value={`${delivery.materialName ?? delivery.materialCode} · ${formatKg(delivery.reportedWeightKg)}`}

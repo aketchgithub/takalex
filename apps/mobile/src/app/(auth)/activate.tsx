@@ -76,6 +76,7 @@ export default function ActivateAccountScreen() {
 
   return (
     <Screen
+      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
       title="Activate your account"
       subtitle="Enter the email address your administrator invited, the invitation code they gave you, and choose a password."
     >

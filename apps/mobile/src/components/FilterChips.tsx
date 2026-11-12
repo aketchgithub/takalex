@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { uiColors } from "@/components/Ui";
+import { uiStyles } from "@/components/Ui";
 
 export function FilterChips<T extends string>({
   options,
@@ -32,16 +32,9 @@ export function FilterChips<T extends string>({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  selected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
-  text: { color: uiColors.text, fontSize: 14, fontWeight: "600" },
-  selectedText: { color: uiColors.white },
+  row: uiStyles.chipRow,
+  chip: uiStyles.chip,
+  selected: uiStyles.chipSelected,
+  text: uiStyles.chipText,
+  selectedText: uiStyles.chipTextSelected,
 });

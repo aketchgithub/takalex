@@ -5,6 +5,7 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 import { FilterChips } from "@/components/FilterChips";
 import { InvitationCodeCard, type IssuedInvitation } from "@/components/InvitationCodeCard";
 import { Card, Row, reviewStyles } from "@/components/ReviewUi";
+import { INVITATION_TONES, StatusRow } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen, SecondaryButton } from "@/components/Ui";
 import { listInvitations, reissueInvitation, revokeInvitation, type InvitationRow } from "@/lib/admin/invitations";
 import {
@@ -73,7 +74,7 @@ export default function InvitationsScreen() {
       : [];
 
   return (
-    <Screen title="Invitations" subtitle="Expiry is checked against the current time. Codes are never shown again here.">
+    <Screen align="top" title="Invitations" subtitle="Expiry is checked against the current time. Codes are never shown again here.">
       <FilterChips options={INVITATION_FILTERS} value={filter} onChange={setFilter} />
       {list.status === "loading" ? <Message>Loading invitations…</Message> : null}
       {list.status === "error" ? (
@@ -155,7 +156,7 @@ function InvitationCard({
       <Text style={reviewStyles.title}>{name}</Text>
       {row.fullName ? <Text style={reviewStyles.meta}>{row.email}</Text> : null}
       <Row label="Role" value={roleLabels[row.role]} />
-      <Row label="Status" value={INVITATION_STATUS_LABELS[display]} />
+      <StatusRow label={INVITATION_STATUS_LABELS[display]} tone={INVITATION_TONES[display]} />
       <Row label="Created" value={formatDateTime(row.createdAt)} />
       {display === "pending" || display === "expired" ? (
         <Row label={display === "expired" ? "Expired" : "Expires"} value={formatDateTime(row.expiresAt)} />
@@ -181,5 +182,5 @@ function InvitationCard({
 }
 
 const styles = StyleSheet.create({
-  actions: { flexDirection: "row", gap: 10, marginTop: 6 },
+  actions: { flexDirection: "row", gap: 12, marginTop: 8 },
 });
