@@ -7,8 +7,14 @@ import type { UserRole } from "@/types/auth";
 
 // Used by every role layout. Renders children only for a signed-in user whose
 // profile loaded without error, is active and has exactly this role. Anyone
-// else goes to "/", which shows the inactive / unavailable message or routes
-// to the correct home. (RLS still decides what data each screen can read.)
+// else goes to the sign-in screen. If they are signed in, the (auth) layout
+// sends them on to app/index.tsx, which shows the inactive / unavailable
+// message or routes to the correct home. (RLS still decides what data each
+// screen can read.)
+//
+// Never redirect to "/" from here: inside a role group "/" resolves to that
+// group's own index (every group has one), which lands back in this gate
+// and loops.
 export function RoleGate({ role, children }: { role: UserRole; children: ReactElement }) {
   const isLoading = useAuthStore((state) => state.isLoading);
   const session = useAuthStore((state) => state.session);
@@ -22,11 +28,8 @@ export function RoleGate({ role, children }: { role: UserRole; children: ReactEl
       </Screen>
     );
   }
-  if (!session) {
+  if (!session || authError || !profile || !profile.is_active || profile.role !== role) {
     return <Redirect href="/(auth)/login" />;
-  }
-  if (authError || !profile || !profile.is_active || profile.role !== role) {
-    return <Redirect href="/" />;
   }
   return children;
 }
