@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+web-build/
+.env
+.env.*
+!.env.example
+supabase/.branches/
+supabase/.temp/
+
+# Claude Code personal settings
+.claude/settings.local.json

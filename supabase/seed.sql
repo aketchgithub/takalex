@@ -1,0 +1,7 @@
+-- LOCAL DEVELOPMENT SEED DATA ONLY
+--
+-- Applied by `supabase db reset` on the local stack ([db.seed] in config.toml).
+-- Intentionally empty: the real Chemolex sites come from migration
+-- 005_sites.sql, and the TEST placeholder sites were removed (7 Nov). Tests
+-- create their own fixtures. Anything added here must be clearly labelled
+-- local test data and must never be needed by the hosted project.

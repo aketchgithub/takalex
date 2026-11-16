@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Manual runs only for the EAS build (it spends build quota).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile:
+    name: Mobile typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Expo SDK 58 / React Native 0.88 require Node ^22.13.0 (matches local Node 22).
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+
+  sql-tests:
+    name: SQL tests (throwaway PostgreSQL)
+    runs-on: ubuntu-latest
+    env:
+      # Dedicated port for the throwaway cluster; run.sh refuses 5432,
+      # 54320-54329, ports in supabase/config.toml and ports already in use.
+      SQLTEST_PORT: '55439'
+      # PostgreSQL 17 matches the local Supabase stack ([db] in supabase/config.toml
+      # sets no major_version, so the CLI default applies). Pinned so CI does not
+      # change silently when Ubuntu's default PostgreSQL moves.
+      PG_BIN: /usr/lib/postgresql/17/bin
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PostgreSQL 17 from the PostgreSQL apt repository
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          # Adds apt.postgresql.org (PGDG) with its signing key, then apt-get update.
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          # postgresql-17 includes contrib modules such as dblink.
+          sudo apt-get install -y --no-install-recommends postgresql-17
+          "$PG_BIN/postgres" --version | grep -E ' 17\.' ||
+            { echo "expected PostgreSQL 17 in $PG_BIN" >&2; exit 1; }
+          test -f /usr/share/postgresql/17/extension/dblink.control
+      - name: Run SQL suites
+        run: supabase/tests/sql/run.sh "$SQLTEST_PORT"
+
+  edge-functions:
+    name: Edge Functions (deno check and lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned to the commit of denoland/setup-deno v2.0.5.
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+        with:
+          # The Deno inside the local edge runtime (supabase/edge-runtime v1.77.9
+          # reports deno 2.1.4). Keep in step when the Supabase CLI updates it.
+          deno-version: '2.1.4'
+      - run: deno --version
+      # Every function entry point and every shared module.
+      - run: deno check --no-lock -- */*.ts
+      - run: deno lint
+
+  eas-preview:
+    name: EAS preview build (manual)
+    if: github.event_name == 'workflow_dispatch'
+    needs: mobile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: eas build --profile preview --platform android --non-interactive

@@ -1,0 +1,60 @@
+import { Redirect, router } from "expo-router";
+
+import { Landing } from "@/components/Landing";
+import { Message, PrimaryButton, Screen } from "@/components/Ui";
+import { useAuthStore } from "@/stores/authStore";
+
+function LoadingScreen() {
+  return (
+    <Screen title="Loading your account" subtitle="Checking your secure session.">
+      <Message>Please wait while Takalex verifies your account.</Message>
+    </Screen>
+  );
+}
+
+export default function IndexRoute() {
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const session = useAuthStore((state) => state.session);
+  const profile = useAuthStore((state) => state.profile);
+  const authError = useAuthStore((state) => state.authError);
+  const signOut = useAuthStore((state) => state.signOut);
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
+
+  if (session) {
+    // Missing, unreadable or inactive profile: a clear message and sign-out
+    // only. The role layouts (RoleGate) apply the same rule, so an inactive
+    // user cannot reach any role screen.
+    if (authError || !profile || !profile.is_active) {
+      return (
+        <Screen title="Account unavailable">
+          <Message tone="error">
+            {authError ?? "Your account is inactive. Ask an administrator for help."}
+          </Message>
+          <PrimaryButton label="Sign out" onPress={() => void signOut()} />
+        </Screen>
+      );
+    }
+
+    switch (profile.role) {
+      case "admin":
+        return <Redirect href="/(admin)/(tabs)" />;
+      case "collector":
+        return <Redirect href="/(collector)" />;
+      case "site_manager":
+        return <Redirect href="/(manager)/(tabs)" />;
+      case "recycler":
+        return <Redirect href="/(recycler)" />;
+    }
+  }
+
+  return (
+    <Landing
+      onInvitationCode={() => router.push("/(auth)/activate")}
+      onRequestAccess={() => router.push("/request-access" as any)}
+      onSignIn={() => router.push("/(auth)/login" as any)}
+    />
+  );
+}
