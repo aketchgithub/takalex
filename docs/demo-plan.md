@@ -1,6 +1,6 @@
 # Takalex — Working Multi-Role Demo Plan
 
-Client: Chemolex (contact: Owino Aketch). Developer: Cynthia Chepkemoi Langat.
+Client: Chemolex.
 This document is the standing brief for building the first working Takalex demo.
 Every Claude Code session working on the demo must read it together with `CLAUDE.md`.
 
