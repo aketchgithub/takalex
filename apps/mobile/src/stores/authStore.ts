@@ -11,6 +11,11 @@ import {
 } from "@/lib/authResolution";
 import { readFunctionFailure } from "@/lib/functions";
 import { toRemoteError } from "@/lib/outbox/errors";
+import {
+  PASSWORD_CHANGE_MESSAGES,
+  classifyPasswordChangeError,
+  type PasswordChangeFailureKind,
+} from "@/lib/passwordRules";
 import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { profileSchema, type InviteRole, type Profile } from "@/types/auth";
@@ -39,6 +44,10 @@ export type ActivationResult =
         | "sign_in_failed";
       message: string;
     };
+
+export type ChangePasswordResult =
+  | { ok: true }
+  | { ok: false; kind: PasswordChangeFailureKind; message: string };
 
 // The invitation code is returned to the caller only. It is never written to
 // this store, so it can never be persisted (see partialize below).
@@ -88,6 +97,12 @@ type AuthState = {
     siteIds: string[],
     accessRequestId?: string,
   ) => Promise<InviteResult>;
+  // Checks the current password, then sets the new one. The user stays
+  // signed in. Neither password is kept, logged or persisted.
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<ChangePasswordResult>;
   signOut: () => Promise<void>;
   setAuthError: (message: string | null) => void;
 };
@@ -430,6 +445,40 @@ export const useAuthStore = create<AuthState>()(
           return { ok: false, message: NETWORK_MESSAGE };
         } finally {
           set({ isInviting: false });
+        }
+      },
+
+      // Re-authenticates the signed-in user's own email with the current
+      // password, then updates the password. The re-authentication replaces
+      // this client's session with a fresh one for the same user (there is
+      // never a second client or a second stored session). isLoading is not
+      // touched, so the role screens stay mounted.
+      changePassword: async (currentPassword, newPassword) => {
+        const email = get().session?.user.email;
+        if (!email) {
+          return { ok: false, kind: "session", message: PASSWORD_CHANGE_MESSAGES.session };
+        }
+
+        try {
+          const { data: verified, error: verifyError } =
+            await supabase.auth.signInWithPassword({ email, password: currentPassword });
+
+          if (verifyError) {
+            return { ok: false, ...classifyPasswordChangeError("verify", toRemoteError(verifyError)) };
+          }
+          if (!verified.session || verified.session.user.id !== get().session?.user.id) {
+            return { ok: false, kind: "other", message: PASSWORD_CHANGE_MESSAGES.other };
+          }
+          get().setSession(verified.session);
+
+          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+          if (updateError) {
+            return { ok: false, ...classifyPasswordChangeError("update", toRemoteError(updateError)) };
+          }
+          return { ok: true };
+        } catch (error: unknown) {
+          // Classified from the error's name, status and code only.
+          return { ok: false, ...classifyPasswordChangeError("update", toRemoteError(error)) };
         }
       },
 

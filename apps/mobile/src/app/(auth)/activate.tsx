@@ -9,13 +9,8 @@ import {
   PrimaryButton,
   Screen,
 } from "@/components/Ui";
+import { PASSWORDS_DO_NOT_MATCH, passwordRuleError } from "@/lib/passwordRules";
 import { useAuthStore } from "@/stores/authStore";
-
-// Mirror accept-invitation's input rules so most mistakes are caught before
-// the request (the function enforces them again).
-const MIN_PASSWORD_LENGTH = 8;
-const MAX_PASSWORD_BYTES = 72;
-const PASSWORD_RULE = `Password must be at least ${MIN_PASSWORD_LENGTH} characters (and at most ${MAX_PASSWORD_BYTES} bytes).`;
 
 const emailSchema = z.string().trim().max(254).email("Enter a valid email address.");
 
@@ -45,14 +40,13 @@ export default function ActivateAccountScreen() {
     if (normaliseCode(code).length === 0) {
       errors.code = "Enter the invitation code from your administrator.";
     }
-    if (
-      password.length < MIN_PASSWORD_LENGTH ||
-      new TextEncoder().encode(password).length > MAX_PASSWORD_BYTES
-    ) {
-      errors.password = PASSWORD_RULE;
+    // Same rules as accept-invitation (the function enforces them again).
+    const passwordError = passwordRuleError(password);
+    if (passwordError) {
+      errors.password = passwordError;
     }
     if (confirmation !== password) {
-      errors.confirmation = "The passwords do not match.";
+      errors.confirmation = PASSWORDS_DO_NOT_MATCH;
     }
     setFieldErrors(errors);
     setError(null);

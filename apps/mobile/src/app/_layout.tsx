@@ -71,9 +71,29 @@ export default function RootLayout() {
       }
 
       setTimeout(() => {
-        if (active) {
-          void useAuthStore.getState().loadSession(session);
+        if (!active) {
+          return;
         }
+
+        // The same user, already loaded, signed in again or was updated
+        // (change password re-authenticates, then updates the user): keep
+        // the screens mounted and re-check the profile in the background
+        // instead of showing the loading screen.
+        const current = useAuthStore.getState();
+        if (
+          session &&
+          (event === "SIGNED_IN" || event === "USER_UPDATED") &&
+          current.session?.user.id === session.user.id &&
+          current.profile &&
+          !current.authError &&
+          !current.isLoading
+        ) {
+          current.setSession(session);
+          void current.refreshProfile();
+          return;
+        }
+
+        void useAuthStore.getState().loadSession(session);
       }, 0);
     });
 

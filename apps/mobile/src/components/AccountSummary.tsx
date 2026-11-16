@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
 
 import { Message, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
 import {
@@ -12,7 +13,8 @@ import { roleLabels } from "@/types/auth";
 
 // Name, role and (unless hidden) the user's assigned sites, plus the
 // collector's group ("{site name} group": each group has its site's name),
-// all read from the database under RLS. Ends with a sign-out button.
+// all read from the database under RLS. Ends with the change-password and
+// sign-out buttons.
 export function AccountSummary({
   showSites = true,
   noSitesText = "You have no assigned sites. Ask an administrator to assign one.",
@@ -93,6 +95,9 @@ export function AccountSummary({
         </View>
       ) : null}
 
+      {/* A root route outside the role groups, so every role reaches it. "as any":
+          the generated route types only learn new routes when Expo next starts. */}
+      <SecondaryButton label="Change password" onPress={() => router.push("/change-password" as any)} />
       <SecondaryButton label="Sign out" loading={isSigningOut} onPress={() => void signOut()} />
     </View>
   );
