@@ -1,4 +1,4 @@
-import type { ComponentRef, PropsWithChildren, RefObject } from "react";
+import { useState, type ComponentRef, type PropsWithChildren, type RefObject } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -100,35 +100,64 @@ function OfflineNotice() {
   );
 }
 
+// revealable: a password field with a Show/Hide control. The text starts
+// hidden, and secureTextEntry from the caller is ignored.
 export function Field({
   error,
   label,
+  revealable = false,
   ...inputProps
-}: TextInputProps & { error?: string; label: string }) {
+}: TextInputProps & { error?: string; label: string; revealable?: boolean }) {
+  const [hidden, setHidden] = useState(true);
+  const input = (
+    <TextInput
+      accessibilityLabel={label}
+      autoCapitalize="none"
+      placeholderTextColor={PLACEHOLDER_COLOR}
+      style={[styles.input, revealable ? styles.inputRevealable : null, error ? styles.inputError : null]}
+      {...inputProps}
+      secureTextEntry={revealable ? hidden : inputProps.secureTextEntry}
+    />
+  );
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        autoCapitalize="none"
-        placeholderTextColor="#798274"
-        style={[styles.input, error ? styles.inputError : null]}
-        {...inputProps}
-      />
+      {revealable ? (
+        <View>
+          {input}
+          <Pressable
+            accessibilityLabel={hidden ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
+            accessibilityRole="button"
+            onPress={() => setHidden((value) => !value)}
+            style={styles.reveal}
+          >
+            <Text style={styles.revealText}>{hidden ? "Show" : "Hide"}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        input
+      )}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
 
+// 4.9:1 on white (WCAG AA asks for 4.5:1).
+const PLACEHOLDER_COLOR = "#6b7466";
+
+// loadingLabel: text shown beside the spinner while loading, e.g.
+// "Signing in…". Without it only the spinner shows.
 export function PrimaryButton({
   disabled = false,
   label,
   loading = false,
+  loadingLabel,
   onPress,
 }: {
   disabled?: boolean;
   label: string;
   loading?: boolean;
+  loadingLabel?: string;
   onPress: () => void;
 }) {
   return (
@@ -143,7 +172,12 @@ export function PrimaryButton({
         disabled || loading ? styles.buttonDisabled : null,
       ]}
     >
-      {loading ? (
+      {loading && loadingLabel ? (
+        <View style={styles.buttonLoading}>
+          <ActivityIndicator color={colors.white} />
+          <Text style={styles.buttonText}>{loadingLabel}</Text>
+        </View>
+      ) : loading ? (
         <ActivityIndicator color={colors.white} />
       ) : (
         <Text style={styles.buttonText}>{label}</Text>
@@ -350,6 +384,25 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: colors.danger,
   },
+  // Room for the Show/Hide control.
+  inputRevealable: {
+    paddingRight: 76,
+  },
+  reveal: {
+    alignItems: "center",
+    bottom: 0,
+    justifyContent: "center",
+    minWidth: 68,
+    paddingHorizontal: 12,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  revealText: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: "600",
+  },
   button: {
     alignItems: "center",
     backgroundColor: colors.primary,
@@ -363,6 +416,11 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  buttonLoading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
   },
   buttonText: {
     color: colors.white,

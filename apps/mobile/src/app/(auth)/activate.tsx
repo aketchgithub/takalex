@@ -99,7 +99,7 @@ export default function ActivateAccountScreen() {
         label="New password"
         onChangeText={setPassword}
         placeholder="At least 8 characters"
-        secureTextEntry
+        revealable
         value={password}
         error={fieldErrors.password}
       />
@@ -108,7 +108,7 @@ export default function ActivateAccountScreen() {
         label="Confirm password"
         onChangeText={setConfirmation}
         placeholder="Re-enter your password"
-        secureTextEntry
+        revealable
         value={confirmation}
         error={fieldErrors.confirmation}
       />
@@ -118,6 +118,7 @@ export default function ActivateAccountScreen() {
       <PrimaryButton
         label="Activate account"
         loading={isActivating}
+        loadingLabel="Activating…"
         onPress={() => void submit()}
       />
       <InlineLink

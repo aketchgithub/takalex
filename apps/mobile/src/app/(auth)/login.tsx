@@ -55,12 +55,13 @@ export default function LoginScreen() {
         label="Password"
         onChangeText={setPassword}
         placeholder="Your password"
-        secureTextEntry
+        revealable
         value={password}
       />
       <PrimaryButton
         label="Sign in"
         loading={isLoading}
+        loadingLabel="Signing in…"
         onPress={() => void signIn()}
       />
 
@@ -71,6 +72,13 @@ export default function LoginScreen() {
         onPress={() => {
           setAuthError(null);
           router.push("/(auth)/activate");
+        }}
+      />
+      <InlineLink
+        label="No invitation? Request access"
+        onPress={() => {
+          setAuthError(null);
+          router.push("/request-access" as any);
         }}
       />
     </Screen>

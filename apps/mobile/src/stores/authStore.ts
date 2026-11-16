@@ -16,6 +16,7 @@ import {
   classifyPasswordChangeError,
   type PasswordChangeFailureKind,
 } from "@/lib/passwordRules";
+import { signInErrorMessage } from "@/lib/signInErrors";
 import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { profileSchema, type InviteRole, type Profile } from "@/types/auth";
@@ -306,17 +307,13 @@ export const useAuthStore = create<AuthState>()(
           });
 
           if (error) {
-            set({ isLoading: false, authError: error.message });
+            set({ isLoading: false, authError: signInErrorMessage(toRemoteError(error)) });
             return;
           }
 
           await get().loadSession(data.session);
         } catch (error: unknown) {
-          set({
-            isLoading: false,
-            authError:
-              error instanceof Error ? error.message : "Could not sign in.",
-          });
+          set({ isLoading: false, authError: signInErrorMessage(toRemoteError(error)) });
         }
       },
 

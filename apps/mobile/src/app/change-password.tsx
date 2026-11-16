@@ -100,7 +100,7 @@ export default function ChangePasswordScreen() {
         autoComplete="current-password"
         label="Current password"
         onChangeText={setCurrentPassword}
-        secureTextEntry
+        revealable
         value={currentPassword}
         error={fieldErrors.currentPassword}
       />
@@ -109,7 +109,7 @@ export default function ChangePasswordScreen() {
         label="New password"
         onChangeText={setNewPassword}
         placeholder="At least 8 characters"
-        secureTextEntry
+        revealable
         value={newPassword}
         error={fieldErrors.newPassword}
       />
@@ -118,14 +118,14 @@ export default function ChangePasswordScreen() {
         label="Confirm new password"
         onChangeText={setConfirmation}
         placeholder="Re-enter your new password"
-        secureTextEntry
+        revealable
         value={confirmation}
         error={fieldErrors.confirmation}
       />
 
       {error ? <Message tone="error">{error}</Message> : null}
 
-      <PrimaryButton label="Change password" loading={isSaving} onPress={() => void submit()} />
+      <PrimaryButton label="Change password" loading={isSaving} loadingLabel="Changing password…" onPress={() => void submit()} />
     </Screen>
   );
 }
