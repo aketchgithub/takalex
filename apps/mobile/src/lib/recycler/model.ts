@@ -50,8 +50,29 @@ const HEADING_SUFFIX: Record<DatePreset, string> = {
 };
 
 // Worded so the totals are not mistaken for live stock.
+export const TOTALS_HEADING = "Approved, verified material";
+
 export function totalsHeading(preset: DatePreset): string {
-  return `Approved, verified material (${HEADING_SUFFIX[preset]})`;
+  return `${TOTALS_HEADING} (${HEADING_SUFFIX[preset]})`;
+}
+
+const PERIOD_LABEL: Record<DatePreset, string> = {
+  all: "All time",
+  month: "This month",
+  last30: "Last 30 days",
+};
+
+// What the totals cover, e.g. "Kariadudu · This month".
+export function totalsScope(siteName: string, preset: DatePreset): string {
+  return `${siteName} · ${PERIOD_LABEL[preset]}`;
+}
+
+// "Updated 19:05" in Nairobi time, whatever time zone the phone is set to.
+export function updatedLabel(at: Date): string {
+  const nairobi = new Date(at.getTime() + NAIROBI_OFFSET_MS);
+  const hh = String(nairobi.getUTCHours()).padStart(2, "0");
+  const mm = String(nairobi.getUTCMinutes()).padStart(2, "0");
+  return `Updated ${hh}:${mm}`;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

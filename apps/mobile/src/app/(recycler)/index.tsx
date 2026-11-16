@@ -6,7 +6,15 @@ import { FilterChips } from "@/components/FilterChips";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
 import { InlineLink, Message, Screen, uiStyles } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
-import { DATE_PRESETS, presetRange, rangeLabel, totalsHeading, type DatePreset } from "@/lib/recycler/model";
+import {
+  DATE_PRESETS,
+  presetRange,
+  rangeLabel,
+  TOTALS_HEADING,
+  totalsScope,
+  updatedLabel,
+  type DatePreset,
+} from "@/lib/recycler/model";
 import { useMaterialTotals } from "@/lib/recycler/useMaterialTotals";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -65,7 +73,7 @@ export default function RecyclerHome() {
     >
       <View style={styles.filters}>
         <Text style={styles.label}>Site</Text>
-        <FilterChips options={siteChips} value={site} onChange={setSite} />
+        <FilterChips options={siteChips} value={site} onChange={setSite} scrollable />
         {siteError ? (
           <>
             <Message tone="error">{siteError}</Message>
@@ -84,15 +92,21 @@ export default function RecyclerHome() {
       </View>
 
       <MaterialTotalsCard
-        heading={totalsHeading(preset)}
-        note={`${siteName}. ${rangeLabel(range)} Totals add up approved deliveries; no sales or pickups are deducted.`}
+        heading={TOTALS_HEADING}
+        scope={totalsScope(siteName, preset)}
+        note={`${rangeLabel(range)} Totals add up approved deliveries; no sales or pickups are deducted.`}
         state={totals.state}
         updating={totals.updating}
+        totalLabel="Total approved weight"
+        emptyText="Nothing approved yet for this site and period. Totals appear here after a site manager weighs and approves a delivery."
       />
       {totals.state.status === "error" ? <InlineLink label="Try again" onPress={refresh} /> : null}
-      <Text style={styles.hint}>Pull down to refresh.</Text>
+      <Text style={styles.hint}>
+        {totals.updatedAt ? `${updatedLabel(totals.updatedAt)} · ` : ""}Pull down to refresh.
+      </Text>
 
-      <AccountSummary noSitesText="None. Recyclers do not need a site assignment." />
+      {/* Recyclers have no site assignments, so the sites section is left out. */}
+      <AccountSummary showSites={false} />
     </Screen>
   );
 }

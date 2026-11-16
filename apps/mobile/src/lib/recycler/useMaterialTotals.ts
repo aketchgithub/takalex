@@ -7,13 +7,14 @@ import { fetchMaterialTotals } from "./api";
 // What was loaded, and for which filter.
 type Loaded =
   | { status: "loading" }
-  | (Exclude<TotalsState, { status: "loading" }> & { key: string });
+  | (Exclude<TotalsState, { status: "loading" }> & { key: string; loadedAt: Date });
 
 // Loads totals for the filter, again whenever it changes or reload() is
 // called.
 //   refreshing  a pull-to-refresh reload is running (the screen's spinner)
 //   updating    the filter changed and the numbers on screen still belong to
 //               the previous one (shown dimmed until the new ones arrive)
+//   updatedAt   when the numbers on screen were loaded (null if none yet)
 export function useMaterialTotals(siteId: string | null, from: string | null, to: string | null) {
   const key = `${siteId ?? "all"}|${from ?? ""}|${to ?? ""}`;
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
@@ -24,7 +25,7 @@ export function useMaterialTotals(siteId: string | null, from: string | null, to
     let active = true;
     fetchMaterialTotals({ siteId, from, to })
       .then((rows) => {
-        if (active) setLoaded({ status: "ready", rows, key });
+        if (active) setLoaded({ status: "ready", rows, key, loadedAt: new Date() });
       })
       .catch((error: unknown) => {
         if (active) {
@@ -32,6 +33,7 @@ export function useMaterialTotals(siteId: string | null, from: string | null, to
             status: "error",
             message: error instanceof Error ? error.message : "Could not load material totals.",
             key,
+            loadedAt: new Date(),
           });
         }
       })
@@ -59,5 +61,7 @@ export function useMaterialTotals(siteId: string | null, from: string | null, to
         : { status: "error", message: loaded.message };
   const updating = stale && loaded.status === "ready";
 
-  return { state, updating, refreshing, reload };
+  const updatedAt = loaded.status === "ready" ? loaded.loadedAt : null;
+
+  return { state, updating, refreshing, reload, updatedAt };
 }

@@ -10,6 +10,8 @@ import {
   rangeLabel,
   totalKg,
   totalsHeading,
+  totalsScope,
+  updatedLabel,
   type MaterialTotal,
 } from "./model.ts";
 
@@ -46,6 +48,18 @@ describe("headings and range labels", () => {
     assert.equal(totalsHeading("all"), "Approved, verified material (all time)");
     assert.equal(totalsHeading("month"), "Approved, verified material (this month)");
     assert.equal(totalsHeading("last30"), "Approved, verified material (last 30 days)");
+  });
+
+  it("names the site and period the totals cover", () => {
+    assert.equal(totalsScope("All sites", "all"), "All sites · All time");
+    assert.equal(totalsScope("Kariadudu", "month"), "Kariadudu · This month");
+    assert.equal(totalsScope("Ng'omong'o", "last30"), "Ng'omong'o · Last 30 days");
+  });
+
+  it("gives the update time in Nairobi time, whatever the phone's zone", () => {
+    assert.equal(updatedLabel(at("2026-11-16T16:05:00Z")), "Updated 19:05");
+    assert.equal(updatedLabel(at("2026-11-16T21:30:00Z")), "Updated 00:30"); // next day in Nairobi
+    assert.equal(updatedLabel(at("2026-11-16T06:07:59Z")), "Updated 09:07");
   });
 
   it("describes the range in Nairobi time", () => {

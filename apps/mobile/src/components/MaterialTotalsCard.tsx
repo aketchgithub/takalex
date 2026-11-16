@@ -10,15 +10,21 @@ export type TotalsState =
 
 // Material -> verified kg, with a total. Shared by the recycler home and the
 // admin overview.
+//   scope      what the numbers cover, e.g. "All sites · This month"
+//   totalLabel label of the total row
 export function MaterialTotalsCard({
   heading,
+  scope,
   note,
   state,
   updating = false,
   emptyText = "No approved, verified material yet for this selection.",
+  totalLabel = "Total",
 }: {
   heading: string;
+  scope?: string;
   note?: string;
+  totalLabel?: string;
   state: TotalsState;
   // The numbers shown belong to the previous filter; new ones are loading.
   updating?: boolean;
@@ -27,6 +33,7 @@ export function MaterialTotalsCard({
   return (
     <View style={styles.card}>
       <Text style={styles.heading}>{heading}</Text>
+      {scope ? <Text style={styles.scope}>{scope}</Text> : null}
       {note ? <Text style={styles.note}>{note}</Text> : null}
 
       {state.status === "loading" ? <Message>Loading totals…</Message> : null}
@@ -48,8 +55,8 @@ export function MaterialTotalsCard({
               </Text>
             </View>
           ))}
-          <View accessible accessibilityLabel={`Total: ${formatTotalKg(totalKg(state.rows))}`} style={[styles.row, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
+          <View accessible accessibilityLabel={`${totalLabel}: ${formatTotalKg(totalKg(state.rows))}`} style={[styles.row, styles.totalRow]}>
+            <Text style={styles.totalLabel}>{totalLabel}</Text>
             <Text style={styles.totalKg}>{formatTotalKg(totalKg(state.rows))}</Text>
           </View>
           {!hasAnyMaterial(state.rows) && !updating ? <Message>{emptyText}</Message> : null}
@@ -62,6 +69,7 @@ export function MaterialTotalsCard({
 const styles = StyleSheet.create({
   card: uiStyles.card,
   heading: uiStyles.sectionHeading,
+  scope: uiStyles.cardTitle,
   note: uiStyles.meta,
   updating: { color: uiColors.muted, fontSize: 13, fontStyle: "italic" },
   dimmed: { opacity: 0.4 },
