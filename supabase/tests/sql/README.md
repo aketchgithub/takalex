@@ -48,6 +48,7 @@ and never touches a remote project.
 | `70_evidence_storage` | the `collection-evidence` bucket row and the RLS policies on `storage.objects` (against the storage stub) |
 | `80_reviewable_collector_names` | `reviewable_collector_names()` (007): names only for collectors with deliveries at the caller's reviewable sites; nothing for collectors, recyclers, inactive or unassigned managers, anon |
 | `90_recycler_material_totals` | `recycler_material_totals()` (008): approved lines only, active recycler-visible materials with 0.00 rows, site filter, Nairobi-day date filter and its midnight boundary, access (recycler/admin only), aggregate-only columns |
+| `95_site_management` | `admin_create_site()` / `admin_update_site()` (009): active admins only, name normalising and rules, case-insensitive duplicates, rename, deactivate/reactivate (inactive = no new people: assigned collectors still submit, invitations refused), `site_events` audit rows, no direct writes, constraint and index guards |
 
 Writing a test: one top-level `DO` block per test, ending in
 `PERFORM t.pass('description');`. The runner counts `t.pass(` calls in the
