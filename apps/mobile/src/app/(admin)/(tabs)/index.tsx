@@ -35,6 +35,8 @@ export default function AdminOverview() {
           label="Manage invitations"
           onPress={() => router.push("/(admin)/(tabs)/invitations")}
         />
+        {/* "as any": the generated route types only learn new routes when Expo next starts. */}
+        <SecondaryButton label="Manage materials" onPress={() => router.push("/(admin)/materials" as any)} />
       </View>
       <MaterialTotalsCard
         heading={totalsHeading("all")}

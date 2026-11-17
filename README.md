@@ -25,7 +25,7 @@ Rules for anyone (or any AI assistant) changing the code are in [`CLAUDE.md`](CL
 | Collector (waste picker) | Belongs to one site, which is their group ("{site} group"). Records a delivery: reported material, reported weight, in-app photo, device time and (if allowed) location. Works offline; deliveries sync later. |
 | Site manager | Chemolex staff assigned to one or more sites. Reviews pending deliveries for those sites, records the verified breakdown (one or more material lines with verified weights) and approves, or rejects with a reason. Reviews are final. |
 | Recycler | Sees approved, verified totals by material, with optional site and date-range filters. No collector identities, photos or individual deliveries. |
-| Admin | Reviews access requests, invites users, assigns roles and sites, revokes and reissues invitations. Adds, renames, deactivates and reactivates sites (an inactive site takes no new people; collectors already there keep working). |
+| Admin | Reviews access requests, invites users, assigns roles and sites, revokes and reissues invitations. Adds, renames, deactivates and reactivates sites (an inactive site takes no new people; collectors already there keep working). Manages the material list (add, edit, reorder, deactivate; delete only unused materials). |
 
 Accounts are invite-only. A waste picker requests access in the app and chooses their
 site; an admin approves the request and the app creates an invitation code, which is
@@ -37,7 +37,8 @@ is switched on ([`docs/password-reset.md`](docs/password-reset.md)).
 ## Materials
 
 Materials are a lookup table (`public.materials`, seeded in migration `001`), not a
-hardcoded list. Each material has flags that the database enforces:
+hardcoded list, and admins manage it in the app (Admin overview → Manage materials,
+migration `010`). Each material has flags that the database enforces:
 
 | Material | Collectors report | Managers verify | Recyclers see |
 |---|:---:|:---:|:---:|
@@ -74,7 +75,7 @@ apps/mobile/            Expo app
   src/stores/           auth state
   eas.json              EAS build profile "preview" (Android APK)
 supabase/
-  migrations/           001–008 deployed and frozen; 009 (site management) local only; every change is a new migration
+  migrations/           001–008 deployed and frozen; 009 (sites) and 010 (materials) local only; every change is a new migration
   functions/            invite-user, accept-invitation, _shared
   tests/sql/            SQL suites on a throwaway PostgreSQL 17 cluster
   tests/local-stack/    checks against the local Supabase stack
