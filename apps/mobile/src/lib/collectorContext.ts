@@ -72,6 +72,10 @@ async function fetchReportableMaterials(): Promise<ReportableMaterial[]> {
 // Collectors are assigned exactly one site (the invitation functions in
 // 003_public_access_flow.sql refuse anything else); anything else is shown
 // as a problem rather than guessed.
+//
+// An inactive site is NOT a problem here. Inactive means "no new people"
+// (decided 16 Nov 2026, migration 009): collectors already assigned keep
+// recording deliveries there, and the database accepts them.
 function resolveSite(sites: AssignedSite[]): { site: AssignedSite | null; siteProblem: string | null } {
   if (sites.length === 0) {
     return { site: null, siteProblem: "You have no assigned site. Ask an administrator to assign one." };
@@ -81,9 +85,6 @@ function resolveSite(sites: AssignedSite[]): { site: AssignedSite | null; sitePr
       site: null,
       siteProblem: "Your account has more than one site. Ask an administrator to keep only your site.",
     };
-  }
-  if (!sites[0].active) {
-    return { site: null, siteProblem: `${sites[0].name} is no longer active. Ask an administrator.` };
   }
   return { site: sites[0], siteProblem: null };
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import { z } from "zod";
 
@@ -20,6 +20,12 @@ export default function LoginScreen() {
   const isLoading = useAuthStore((state) => state.isLoading);
   const authError = useAuthStore((state) => state.authError);
   const setAuthError = useAuthStore((state) => state.setAuthError);
+
+  // A sign-in error belongs to the attempt that caused it: clear it when the
+  // screen opens again (for example after "Back to home").
+  useEffect(() => {
+    setAuthError(null);
+  }, [setAuthError]);
 
   const signIn = async () => {
     const emailResult = emailSchema.safeParse(email);
@@ -46,14 +52,20 @@ export default function LoginScreen() {
         autoCapitalize="none"
         keyboardType="email-address"
         label="Email"
-        onChangeText={setEmail}
+        onChangeText={(value) => {
+          setEmail(value);
+          if (authError) setAuthError(null);
+        }}
         placeholder="you@example.com"
         value={email}
       />
       <Field
         autoComplete="current-password"
         label="Password"
-        onChangeText={setPassword}
+        onChangeText={(value) => {
+          setPassword(value);
+          if (authError) setAuthError(null);
+        }}
         placeholder="Your password"
         revealable
         value={password}
@@ -66,6 +78,13 @@ export default function LoginScreen() {
       />
 
       {authError ? <Message tone="error">{authError}</Message> : null}
+      <InlineLink
+        label="Forgot password?"
+        onPress={() => {
+          setAuthError(null);
+          router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } } as any);
+        }}
+      />
       <Message>New accounts are created by administrator invitation.</Message>
       <InlineLink
         label="I have an invitation code"

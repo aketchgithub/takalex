@@ -25,6 +25,40 @@ site_url = "http://localhost:3000"
 enable_confirmations = true
 max_frequency = "1m0s"
 otp_length = 8
+# Seconds a code stays valid; the recovery email says "one hour".
+otp_expiry = 3600
+
+# "Forgot password?" sends a code, not a link (the app handles no email
+# links). The path is relative to the project folder. Local only: on the hosted project, paste the same subject and HTML
+# into Authentication > Email Templates > Reset password.
+[auth.email.template.recovery]
+subject = "Your Takalex password reset code"
+content_path = "./supabase/templates/recovery.html"
+
+# SMS codes for "Forgot password?" and for verifying the phone number a
+# signed-in user adds. This turns the phone provider on; public sign-up stays
+# off through [auth] enable_signup = false, and the app asks for codes with
+# shouldCreateUser false.
+[auth.sms]
+enabled = true
+max_frequency = "1m0s"
+template = "Your Takalex code is {{ .Code }}"
+
+# LOCAL ONLY. Auth needs an SMS provider configured, but sends nothing to the
+# test numbers below and ignores these placeholder credentials. Never put real
+# credentials here: the real SMS provider is set up only on the hosted project,
+# by the maintainer (docs/password-reset.md).
+[auth.sms.twilio]
+enabled = true
+account_sid = "placeholder"
+message_service_sid = "placeholder"
+auth_token = "placeholder"
+
+# Fixed codes for local testing (no SMS is sent). In the app, type the number
+# as 0700 000 001 or 0700 000 002.
+[auth.sms.test_otp]
+254700000001 = "123456"
+254700000002 = "654321"
 
 [auth.mfa.totp]
 enroll_enabled = true

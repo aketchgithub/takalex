@@ -14,6 +14,9 @@ Nothing here touches the hosted project.
 ```bash
 cd ~/Development/code/TAKALEX
 supabase start                       # if not already running
+# On a laptop with little memory (WSL with about 4 GB), start without the
+# containers Takalex does not need (logs, Realtime, the Studio dashboard):
+#   supabase start -x logflare,vector,realtime,studio
 supabase functions serve             # leave running (invite-user, accept-invitation)
 ```
 
@@ -31,6 +34,10 @@ supabase/scripts/dev-admin.sh
 EXPO_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<the sb_publishable_... key from `supabase status`>
 ```
+
+To test the SMS password reset screens (off by default), also add
+`EXPO_PUBLIC_SMS_PASSWORD_RESET=true` and use the test numbers in
+`supabase/config.toml` (see `docs/password-reset.md`).
 
 Only the **publishable** key goes here. Never put the secret or service-role key
 here: every `EXPO_PUBLIC_*` value is bundled into the app. After changing the

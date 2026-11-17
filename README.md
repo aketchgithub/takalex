@@ -13,8 +13,10 @@ Rules for anyone (or any AI assistant) changing the code are in [`CLAUDE.md`](CL
 - Hosted Supabase project deployed: migrations `001`–`008` (frozen) and the Edge
   Functions `invite-user` and `accept-invitation`.
 - Android preview APK built with EAS (profile `preview`).
-- Not yet available: email "Forgot password" (needs custom SMTP on a Chemolex domain),
-  payments, site coordinates.
+- "Forgot password?" by email code is built and goes live once Chemolex's email sender is
+  set up on the hosted project. Reset by SMS (with email as the option) is built behind a
+  switch that stays off until an SMS provider is chosen ([`docs/password-reset.md`](docs/password-reset.md)).
+- Not yet available: payments, site coordinates.
 
 ## Roles
 
@@ -28,7 +30,9 @@ Rules for anyone (or any AI assistant) changing the code are in [`CLAUDE.md`](CL
 Accounts are invite-only. A waste picker requests access in the app and chooses their
 site; an admin approves the request and the app creates an invitation code, which is
 shared by WhatsApp or SMS. The invitee activates the account with their email, the code
-and a new password. Every signed-in user can change their password.
+and a new password. Every signed-in user can change their password. A forgotten password
+is reset with a code sent by email, or by SMS to a phone number the user has added once SMS
+is switched on ([`docs/password-reset.md`](docs/password-reset.md)).
 
 ## Materials
 

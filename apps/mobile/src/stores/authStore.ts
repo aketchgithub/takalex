@@ -16,6 +16,13 @@ import {
   classifyPasswordChangeError,
   type PasswordChangeFailureKind,
 } from "@/lib/passwordRules";
+import {
+  phoneChangeErrorMessage,
+  resetRequestOutcome,
+  resetVerifyErrorMessage,
+  type ResetChannel,
+  type ResetRequestOutcome,
+} from "@/lib/passwordReset";
 import { signInErrorMessage } from "@/lib/signInErrors";
 import { authStorage } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
@@ -73,6 +80,11 @@ type AuthState = {
   isHydrated: boolean;
   isInviting: boolean;
   isActivating: boolean;
+  // Not persisted. True from checking a "Forgot password?" code until the
+  // new password is saved (or the reset is cancelled). Checking the code
+  // signs the user in; while this is set the sign-in screens keep them on
+  // the reset screen instead of sending them home.
+  isResettingPassword: boolean;
   authError: string | null;
   // Not persisted. "cached": the profile could not be checked (no
   // connection) and the cached profile of this same, active user is in use.
@@ -104,6 +116,23 @@ type AuthState = {
     currentPassword: string,
     newPassword: string,
   ) => Promise<ChangePasswordResult>;
+  // "Forgot password?" by SMS code (address: E.164 phone number) or email
+  // code. requestPasswordReset answers the same way whether or not the
+  // number or email has an account.
+  requestPasswordReset: (channel: ResetChannel, address: string) => Promise<ResetRequestOutcome>;
+  verifyResetCode: (
+    channel: ResetChannel,
+    address: string,
+    code: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  setResetPassword: (newPassword: string) => Promise<ChangePasswordResult>;
+  // Leaves the reset; signs out if the code was already checked.
+  cancelPasswordReset: () => Promise<void>;
+  // The signed-in user adds or changes the phone number used for password
+  // reset: an SMS code goes to the new number, which is saved once the code
+  // is confirmed (profiles.phone follows auth.users, migration 002).
+  sendPhoneCode: (phone: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  confirmPhoneCode: (phone: string, code: string) => Promise<{ ok: true } | { ok: false; message: string }>;
   signOut: () => Promise<void>;
   setAuthError: (message: string | null) => void;
 };
@@ -178,6 +207,7 @@ export const useAuthStore = create<AuthState>()(
       isHydrated: false,
       isInviting: false,
       isActivating: false,
+      isResettingPassword: false,
       authError: null,
       offline: null,
 
@@ -476,6 +506,88 @@ export const useAuthStore = create<AuthState>()(
         } catch (error: unknown) {
           // Classified from the error's name, status and code only.
           return { ok: false, ...classifyPasswordChangeError("update", toRemoteError(error)) };
+        }
+      },
+
+      requestPasswordReset: async (channel, address) => {
+        try {
+          const { error } =
+            channel === "phone"
+              ? // shouldCreateUser false: a number with no account gets no
+                // account (and public sign-up is off anyway).
+                await supabase.auth.signInWithOtp({ phone: address, options: { shouldCreateUser: false } })
+              : await supabase.auth.resetPasswordForEmail(address);
+          return resetRequestOutcome(error ? toRemoteError(error) : null, channel);
+        } catch (error: unknown) {
+          return resetRequestOutcome(toRemoteError(error), channel);
+        }
+      },
+
+      verifyResetCode: async (channel, address, code) => {
+        // Set before the call: a correct code signs the user in at once.
+        set({ isResettingPassword: true, authError: null });
+        try {
+          const { data, error } =
+            channel === "phone"
+              ? await supabase.auth.verifyOtp({ phone: address, token: code, type: "sms" })
+              : await supabase.auth.verifyOtp({ email: address, token: code, type: "recovery" });
+          if (error || !data.session) {
+            set({ isResettingPassword: false });
+            return { ok: false, message: resetVerifyErrorMessage(toRemoteError(error ?? { message: "No session" })) };
+          }
+          return { ok: true };
+        } catch (error: unknown) {
+          set({ isResettingPassword: false });
+          return { ok: false, message: resetVerifyErrorMessage(toRemoteError(error)) };
+        }
+      },
+
+      setResetPassword: async (newPassword) => {
+        if (!get().isResettingPassword || !get().session) {
+          return { ok: false, kind: "session", message: PASSWORD_CHANGE_MESSAGES.session };
+        }
+        try {
+          const { error } = await supabase.auth.updateUser({ password: newPassword });
+          if (error) {
+            return { ok: false, ...classifyPasswordChangeError("update", toRemoteError(error)) };
+          }
+          // The sign-in screens now send the user home.
+          set({ isResettingPassword: false });
+          return { ok: true };
+        } catch (error: unknown) {
+          return { ok: false, ...classifyPasswordChangeError("update", toRemoteError(error)) };
+        }
+      },
+
+      cancelPasswordReset: async () => {
+        // Sign out first: clearing the flag while still signed in would let
+        // the sign-in screens send the user home.
+        if (get().isResettingPassword && get().session !== null) await get().signOut();
+        set({ isResettingPassword: false });
+      },
+
+      sendPhoneCode: async (phone) => {
+        if (!get().session) return { ok: false, message: PASSWORD_CHANGE_MESSAGES.session };
+        try {
+          const { error } = await supabase.auth.updateUser({ phone });
+          if (error) return { ok: false, message: phoneChangeErrorMessage(toRemoteError(error)) };
+          return { ok: true };
+        } catch (error: unknown) {
+          return { ok: false, message: phoneChangeErrorMessage(toRemoteError(error)) };
+        }
+      },
+
+      confirmPhoneCode: async (phone, code) => {
+        if (!get().session) return { ok: false, message: PASSWORD_CHANGE_MESSAGES.session };
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ phone, token: code, type: "phone_change" });
+          if (error) return { ok: false, message: resetVerifyErrorMessage(toRemoteError(error)) };
+          // The listener also receives USER_UPDATED; set the session now so
+          // the account card shows the number at once.
+          if (data.session && data.session.user.id === get().session?.user.id) get().setSession(data.session);
+          return { ok: true };
+        } catch (error: unknown) {
+          return { ok: false, message: resetVerifyErrorMessage(toRemoteError(error)) };
         }
       },
 

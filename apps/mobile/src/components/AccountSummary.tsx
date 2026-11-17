@@ -8,6 +8,8 @@ import {
   loadAccountSummary,
   type AccountSummary as Summary,
 } from "@/lib/account";
+import { SMS_PASSWORD_RESET } from "@/lib/features";
+import { formatPhone } from "@/lib/phoneNumber";
 import { useAuthStore } from "@/stores/authStore";
 import { roleLabels } from "@/types/auth";
 
@@ -24,6 +26,8 @@ export function AccountSummary({
 }) {
   const profile = useAuthStore((state) => state.profile);
   const signOut = useAuthStore((state) => state.signOut);
+  // The number on the Auth account (verified by SMS), used for "Forgot password?".
+  const phone = formatPhone(useAuthStore((state) => state.session?.user.phone));
   const isSigningOut = useAuthStore((state) => state.isLoading);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +99,24 @@ export function AccountSummary({
         </View>
       ) : null}
 
-      {/* A root route outside the role groups, so every role reaches it. "as any":
+      {/* Only while SMS password reset is switched on (lib/features.ts). */}
+      {SMS_PASSWORD_RESET ? (
+        <>
+          <Row label="Phone for password reset" value={phone ?? "Not added yet"} />
+          {phone ? null : (
+            <Message>Add your phone number so you can reset your password by SMS if you forget it.</Message>
+          )}
+        </>
+      ) : null}
+
+      {/* Root routes outside the role groups, so every role reaches them. "as any":
           the generated route types only learn new routes when Expo next starts. */}
+      {SMS_PASSWORD_RESET ? (
+        <SecondaryButton
+          label={phone ? "Change phone number" : "Add phone number"}
+          onPress={() => router.push("/phone-number" as any)}
+        />
+      ) : null}
       <SecondaryButton label="Change password" onPress={() => router.push("/change-password" as any)} />
       <SecondaryButton label="Sign out" loading={isSigningOut} onPress={() => void signOut()} />
     </View>

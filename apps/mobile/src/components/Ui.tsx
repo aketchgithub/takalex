@@ -1,6 +1,7 @@
 import { useState, type ComponentRef, type PropsWithChildren, type RefObject } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -63,27 +64,32 @@ export function Screen({
 }>) {
   return (
     <SafeAreaView edges={brand ? undefined : UNDER_HEADER_EDGES} style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={[styles.content, align === "top" ? styles.contentTop : null]}
-        keyboardShouldPersistTaps="handled"
-        ref={scrollRef}
-        refreshControl={
-          onRefresh ? (
-            <RefreshControl colors={[colors.primary]} onRefresh={onRefresh} refreshing={refreshing} tintColor={colors.primary} />
-          ) : undefined
-        }
-      >
-        {topLink ? (
-          <View style={styles.topLink}>
-            <InlineLink label={topLink.label} large onPress={topLink.onPress} />
-          </View>
-        ) : null}
-        {brand ? <Text style={styles.brand}>TAKALEX</Text> : null}
-        <OfflineNotice />
-        {title ? <Text style={styles.title}>{title}</Text> : null}
-        {subtitle ? <Text style={[styles.subtitle, title ? null : styles.subtitleAlone]}>{subtitle}</Text> : null}
-        <View style={[styles.body, title || subtitle ? null : styles.bodyAlone]}>{children}</View>
-      </ScrollView>
+      {/* Android draws apps edge to edge, so the window no longer shrinks when
+          the keyboard opens. This pads the scroll area by the part the keyboard
+          covers, so every field and button can still be scrolled to. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.keyboard}>
+        <ScrollView
+          contentContainerStyle={[styles.content, align === "top" ? styles.contentTop : null]}
+          keyboardShouldPersistTaps="handled"
+          ref={scrollRef}
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl colors={[colors.primary]} onRefresh={onRefresh} refreshing={refreshing} tintColor={colors.primary} />
+            ) : undefined
+          }
+        >
+          {topLink ? (
+            <View style={styles.topLink}>
+              <InlineLink label={topLink.label} large onPress={topLink.onPress} />
+            </View>
+          ) : null}
+          {brand ? <Text style={styles.brand}>TAKALEX</Text> : null}
+          <OfflineNotice />
+          {title ? <Text style={styles.title}>{title}</Text> : null}
+          {subtitle ? <Text style={[styles.subtitle, title ? null : styles.subtitleAlone]}>{subtitle}</Text> : null}
+          <View style={[styles.body, title || subtitle ? null : styles.bodyAlone]}>{children}</View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -309,6 +315,9 @@ export const uiStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: colors.background,
+    flex: 1,
+  },
+  keyboard: {
     flex: 1,
   },
   content: {

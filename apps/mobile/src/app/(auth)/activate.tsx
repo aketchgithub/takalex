@@ -9,6 +9,7 @@ import {
   PrimaryButton,
   Screen,
 } from "@/components/Ui";
+import { SMS_PASSWORD_RESET } from "@/lib/features";
 import { PASSWORDS_DO_NOT_MATCH, passwordRuleError } from "@/lib/passwordRules";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -113,6 +114,11 @@ export default function ActivateAccountScreen() {
         error={fieldErrors.confirmation}
       />
 
+      <Message>
+        {SMS_PASSWORD_RESET
+          ? "After you sign in, add your phone number in your account so you can reset your password by SMS if you ever forget it."
+          : "Use an email address you can open on this phone. You will need it if you ever forget your password."}
+      </Message>
       {error ? <Message tone="error">{error}</Message> : null}
 
       <PrimaryButton
