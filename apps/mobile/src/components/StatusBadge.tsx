@@ -4,6 +4,7 @@
 import { StyleSheet, Text, View } from "react-native";
 
 import { uiColors } from "@/components/Ui";
+import { colors } from "@/theme/tokens";
 import type { InvitationDisplayStatus, RequestStatus } from "@/lib/admin/model";
 import { deliveryStatusLabel, type DeliveryStatus } from "@/lib/outbox/presentation";
 
@@ -11,10 +12,11 @@ export type StatusTone = "amber" | "green" | "red" | "grey";
 
 // Text on its badge background is at least 7:1.
 const TONES: Record<StatusTone, { backgroundColor: string; borderColor: string; color: string }> = {
-  amber: { backgroundColor: "#fff4d6", borderColor: "#e3c56f", color: "#6b4e00" },
-  green: { backgroundColor: "#e3f1e7", borderColor: "#9cc9ad", color: "#1b5637" },
-  red: { backgroundColor: "#fbe9e9", borderColor: "#e0a9a9", color: "#8a2424" },
-  grey: { backgroundColor: "#eceee8", borderColor: "#c9cfc2", color: "#3f4a3d" },
+  // Soft pill colours from theme/tokens.ts (text passes WCAG AA on its fill).
+  amber: { backgroundColor: colors.warningSoft, borderColor: colors.warningSoft, color: colors.warning },
+  green: { backgroundColor: colors.successSoft, borderColor: colors.successSoft, color: colors.success },
+  red: { backgroundColor: colors.dangerSoft, borderColor: colors.dangerSoft, color: colors.danger },
+  grey: { backgroundColor: colors.divider, borderColor: colors.divider, color: "#3F4A3F" },
 };
 
 const DELIVERY_TONES: Record<DeliveryStatus, StatusTone> = {
@@ -85,13 +87,13 @@ export function DeliveryStatusRow({
 const styles = StyleSheet.create({
   badge: {
     alignSelf: "flex-start",
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
     flexShrink: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  badgeText: { fontSize: 13, fontWeight: "700" },
+  badgeText: { fontSize: 12, fontWeight: "600" },
   block: { gap: 4 },
   row: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
   rowLabel: { color: uiColors.muted, flexShrink: 0, fontSize: 14 },

@@ -1,6 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { uiStyles } from "@/components/Ui";
+import { useFontSize } from "@/theme/useFontSize";
 
 // The selected chip shows a check mark as well as its colour, so selection
 // does not rely on colour alone. scrollable: one row that scrolls sideways
@@ -16,6 +17,7 @@ export function FilterChips<T extends string>({
   onChange: (value: T) => void;
   scrollable?: boolean;
 }) {
+  const fs = useFontSize();
   const chips = options.map((option) => {
     const selected = option.value === value;
     return (
@@ -27,7 +29,7 @@ export function FilterChips<T extends string>({
         onPress={() => onChange(option.value)}
         style={[styles.chip, selected ? styles.selected : null]}
       >
-        <Text style={[styles.text, selected ? styles.selectedText : null]}>
+        <Text style={[styles.text, { fontSize: fs(14) }, selected ? styles.selectedText : null]}>
           {selected ? `✓ ${option.label}` : option.label}
         </Text>
       </Pressable>

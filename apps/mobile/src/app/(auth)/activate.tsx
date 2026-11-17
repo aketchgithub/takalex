@@ -2,13 +2,8 @@ import { useState } from "react";
 import { router } from "expo-router";
 import { z } from "zod";
 
-import {
-  Field,
-  InlineLink,
-  Message,
-  PrimaryButton,
-  Screen,
-} from "@/components/Ui";
+import { AuthScreen } from "@/components/AuthScreen";
+import { Field, Message, PrimaryButton } from "@/components/Ui";
 import { SMS_PASSWORD_RESET } from "@/lib/features";
 import { PASSWORDS_DO_NOT_MATCH, passwordRuleError } from "@/lib/passwordRules";
 import { useAuthStore } from "@/stores/authStore";
@@ -70,8 +65,11 @@ export default function ActivateAccountScreen() {
   };
 
   return (
-    <Screen
-      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
+    <AuthScreen
+      footer={{
+        label: signInInstead ? "Go to sign in" : "Back to sign in",
+        onPress: () => router.replace("/(auth)/login"),
+      }}
       title="Activate your account"
       subtitle="Enter the email address your administrator invited, the invitation code they gave you, and choose a password."
     >
@@ -127,10 +125,6 @@ export default function ActivateAccountScreen() {
         loadingLabel="Activating…"
         onPress={() => void submit()}
       />
-      <InlineLink
-        label={signInInstead ? "Go to sign in" : "Back to sign in"}
-        onPress={() => router.replace("/(auth)/login")}
-      />
-    </Screen>
+    </AuthScreen>
   );
 }

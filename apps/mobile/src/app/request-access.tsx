@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 
-import { Field, Message, PrimaryButton, Screen, uiColors } from "@/components/Ui";
+import { AuthScreen } from "@/components/AuthScreen";
+import { Field, Message, PrimaryButton, uiColors, uiStyles } from "@/components/Ui";
 import {
   getPublicSiteOptions,
   submitAccessRequest,
@@ -120,10 +121,10 @@ export default function RequestAccessScreen() {
   };
 
   return (
-    <Screen
-      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
+    <AuthScreen
+      footer={{ label: "Back to home", onPress: () => router.dismissTo("/") }}
       title="Request access"
-      subtitle="Public discovery is open, but operational access is controlled through a verified invitation flow."
+      subtitle="Tell us who you are. An administrator reviews each request and sends an invitation code if it is approved."
     >
       <Field
         label="Full name"
@@ -247,60 +248,33 @@ export default function RequestAccessScreen() {
         placeholder="Referral or workplace"
       />
       {error ? <Message tone="error">{error}</Message> : null}
-      {status ? <Message>{status}</Message> : null}
+      {status ? <Message tone="success">{status}</Message> : null}
       <PrimaryButton
         label="Submit request"
         loading={loading}
         onPress={() => void submit()}
       />
-      <PrimaryButton label="Back to home" onPress={() => router.dismissTo("/")} />
-    </Screen>
+    </AuthScreen>
   );
 }
 
 // Matches the Field label and input styling in src/components/Ui.tsx.
 const styles = StyleSheet.create({
   roleField: {
-    gap: 7,
+    gap: 6,
   },
-  roleLabel: {
-    color: uiColors.text,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  hint: {
-    color: uiColors.muted,
-    fontSize: 13,
-  },
-  roleOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
+  roleLabel: uiStyles.fieldLabel,
+  hint: uiStyles.meta,
+  roleOptions: uiStyles.chipRow,
   roleOption: {
+    ...uiStyles.chip,
     alignItems: "center",
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
     flexGrow: 1,
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 14,
   },
-  roleOptionSelected: {
-    backgroundColor: uiColors.primary,
-    borderColor: uiColors.primary,
-  },
+  roleOptionSelected: uiStyles.chipSelected,
   roleOptionPressed: {
     opacity: 0.85,
   },
-  roleOptionText: {
-    color: uiColors.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  roleOptionTextSelected: {
-    color: uiColors.white,
-  },
+  roleOptionText: uiStyles.chipText,
+  roleOptionTextSelected: uiStyles.chipTextSelected,
 });

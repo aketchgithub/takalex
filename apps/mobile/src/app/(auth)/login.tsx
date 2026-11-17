@@ -2,13 +2,8 @@ import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import { z } from "zod";
 
-import {
-  Field,
-  InlineLink,
-  Message,
-  PrimaryButton,
-  Screen,
-} from "@/components/Ui";
+import { AuthScreen, Divider } from "@/components/AuthScreen";
+import { Field, InlineLink, Message, PrimaryButton, SecondaryButton } from "@/components/Ui";
 import { useAuthStore } from "@/stores/authStore";
 
 const emailSchema = z.string().trim().email("Enter a valid email address.");
@@ -41,11 +36,16 @@ export default function LoginScreen() {
     await signInWithPassword(emailResult.data, password);
   };
 
+  const go = (target: () => void) => {
+    setAuthError(null);
+    target();
+  };
+
   return (
-    <Screen
-      topLink={{ label: "‹ Back to home", onPress: () => router.dismissTo("/") }}
+    <AuthScreen
       title="Welcome back"
-      subtitle="Sign in to your Takalex account."
+      subtitle="Sign in to record and review deliveries."
+      footer={{ label: "Back to home", onPress: () => router.dismissTo("/") }}
     >
       <Field
         autoComplete="email"
@@ -62,6 +62,11 @@ export default function LoginScreen() {
       <Field
         autoComplete="current-password"
         label="Password"
+        labelAction={{
+          label: "Forgot password?",
+          onPress: () =>
+            go(() => router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } } as any)),
+        }}
         onChangeText={(value) => {
           setPassword(value);
           if (authError) setAuthError(null);
@@ -70,36 +75,15 @@ export default function LoginScreen() {
         revealable
         value={password}
       />
-      <PrimaryButton
-        label="Sign in"
-        loading={isLoading}
-        loadingLabel="Signing in…"
-        onPress={() => void signIn()}
-      />
 
       {authError ? <Message tone="error">{authError}</Message> : null}
-      <InlineLink
-        label="Forgot password?"
-        onPress={() => {
-          setAuthError(null);
-          router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } } as any);
-        }}
-      />
-      <Message>New accounts are created by administrator invitation.</Message>
-      <InlineLink
-        label="I have an invitation code"
-        onPress={() => {
-          setAuthError(null);
-          router.push("/(auth)/activate");
-        }}
-      />
-      <InlineLink
-        label="No invitation? Request access"
-        onPress={() => {
-          setAuthError(null);
-          router.push("/request-access" as any);
-        }}
-      />
-    </Screen>
+
+      <PrimaryButton label="Sign in" loading={isLoading} loadingLabel="Signing in…" onPress={() => void signIn()} />
+
+      <Divider label="New to Takalex?" />
+
+      <SecondaryButton label="I have an invitation code" onPress={() => go(() => router.push("/(auth)/activate"))} />
+      <InlineLink label="Request access" onPress={() => go(() => router.push("/request-access" as any))} />
+    </AuthScreen>
   );
 }

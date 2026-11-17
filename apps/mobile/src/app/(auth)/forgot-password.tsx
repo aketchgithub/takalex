@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { z } from "zod";
 
-import { Field, InlineLink, Message, PrimaryButton, Screen } from "@/components/Ui";
+import { AuthScreen } from "@/components/AuthScreen";
+import { Field, InlineLink, Message, PrimaryButton } from "@/components/Ui";
 import { SMS_PASSWORD_RESET } from "@/lib/features";
 import { normaliseResetCode, resetCodeError, type ResetChannel } from "@/lib/passwordReset";
 import { PASSWORDS_DO_NOT_MATCH, passwordRuleError } from "@/lib/passwordRules";
@@ -147,8 +148,8 @@ export default function ForgotPasswordScreen() {
 
   if (step === "address") {
     return (
-      <Screen
-        topLink={{ label: "‹ Back to sign in", onPress: () => void backToSignIn() }}
+      <AuthScreen
+        footer={{ label: "Back to sign in", onPress: () => void backToSignIn() }}
         title="Forgot your password?"
         subtitle={
           channel === "phone"
@@ -188,15 +189,15 @@ export default function ForgotPasswordScreen() {
         {error ? <Message tone="error">{error}</Message> : null}
         <PrimaryButton label="Send code" loading={busy === "send"} loadingLabel="Sending…" onPress={() => void submitAddress()} />
         {SMS_PASSWORD_RESET ? <InlineLink label={switchLabel} onPress={() => void startAgain(other)} /> : null}
-      </Screen>
+      </AuthScreen>
     );
   }
 
   const shownAddress = channel === "phone" ? (formatPhone(sentTo) ?? sentTo) : sentTo;
 
   return (
-    <Screen
-      topLink={{ label: "‹ Back to sign in", onPress: () => void backToSignIn() }}
+    <AuthScreen
+      footer={{ label: "Back to sign in", onPress: () => void backToSignIn() }}
       title={verified ? "Choose a new password" : "Enter the code"}
       subtitle={verified ? "Your code was accepted." : `Sent to ${shownAddress}.`}
     >
@@ -255,6 +256,6 @@ export default function ForgotPasswordScreen() {
           {SMS_PASSWORD_RESET ? <InlineLink label={switchLabel} onPress={() => void startAgain(other)} /> : null}
         </>
       )}
-    </Screen>
+    </AuthScreen>
   );
 }

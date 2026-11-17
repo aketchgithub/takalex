@@ -15,21 +15,17 @@ import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { OFFLINE_NOTICE } from "@/lib/authResolution";
 import { useAuthStore } from "@/stores/authStore";
+import { colors as tokenColors, radius, space, touch, type } from "@/theme/tokens";
+import { useFontSize } from "@/theme/useFontSize";
 
-const colors = {
-  background: "#f6f7f2",
-  border: "#d9dfd1",
-  danger: "#9b2c2c",
-  muted: "#5b6658",
-  primary: "#236b47",
-  text: "#1d2b22",
-  white: "#ffffff",
-};
+// Colours, spacing and sizes come from theme/tokens.ts; font sizes follow the
+// user's text size (theme/useFontSize.ts).
+const colors = tokenColors;
 
 export type ScreenScrollView = ComponentRef<typeof ScrollView>;
 
 // One spacing scale for every screen.
-export const uiSpace = { xs: 8, sm: 12, md: 16, lg: 24 } as const;
+export const uiSpace = { xs: space.xs, sm: space.sm, md: space.md, lg: space.lg } as const;
 
 // A page under a navigation header: the header already covers the top inset.
 const UNDER_HEADER_EDGES: Edge[] = ["left", "right", "bottom"];
@@ -62,6 +58,7 @@ export function Screen({
   refreshing?: boolean;
   onRefresh?: () => void;
 }>) {
+  const fs = useFontSize();
   return (
     <SafeAreaView edges={brand ? undefined : UNDER_HEADER_EDGES} style={styles.safeArea}>
       {/* Android draws apps edge to edge, so the window no longer shrinks when
@@ -85,8 +82,22 @@ export function Screen({
           ) : null}
           {brand ? <Text style={styles.brand}>TAKALEX</Text> : null}
           <OfflineNotice />
-          {title ? <Text style={styles.title}>{title}</Text> : null}
-          {subtitle ? <Text style={[styles.subtitle, title ? null : styles.subtitleAlone]}>{subtitle}</Text> : null}
+          {title ? (
+            <Text accessibilityRole="header" style={[styles.title, { fontSize: fs(type.display) }]}>
+              {title}
+            </Text>
+          ) : null}
+          {subtitle ? (
+            <Text
+              style={[
+                styles.subtitle,
+                { fontSize: fs(14), lineHeight: fs(21) },
+                title ? null : styles.subtitleAlone,
+              ]}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
           <View style={[styles.body, title || subtitle ? null : styles.bodyAlone]}>{children}</View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -98,9 +109,10 @@ export function Screen({
 // checked with the server and the cached one is in use.
 function OfflineNotice() {
   const offline = useAuthStore((state) => state.offline === "cached" && state.session !== null);
+  const fs = useFontSize();
   if (!offline) return null;
   return (
-    <Text accessibilityRole="alert" style={styles.offline}>
+    <Text accessibilityRole="alert" style={[styles.offline, { fontSize: fs(type.meta) }]}>
       {OFFLINE_NOTICE}
     </Text>
   );
@@ -108,26 +120,48 @@ function OfflineNotice() {
 
 // revealable: a password field with a Show/Hide control. The text starts
 // hidden, and secureTextEntry from the caller is ignored.
+// labelAction: a small link on the label's line, e.g. "Forgot password?".
 export function Field({
   error,
   label,
+  labelAction,
   revealable = false,
   ...inputProps
-}: TextInputProps & { error?: string; label: string; revealable?: boolean }) {
+}: TextInputProps & {
+  error?: string;
+  label: string;
+  labelAction?: { label: string; onPress: () => void };
+  revealable?: boolean;
+}) {
   const [hidden, setHidden] = useState(true);
+  const fs = useFontSize();
   const input = (
     <TextInput
       accessibilityLabel={label}
       autoCapitalize="none"
-      placeholderTextColor={PLACEHOLDER_COLOR}
-      style={[styles.input, revealable ? styles.inputRevealable : null, error ? styles.inputError : null]}
+      placeholderTextColor={colors.placeholder}
+      style={[
+        styles.input,
+        { fontSize: fs(type.body) },
+        revealable ? styles.inputRevealable : null,
+        error ? styles.inputError : null,
+      ]}
       {...inputProps}
       secureTextEntry={revealable ? hidden : inputProps.secureTextEntry}
     />
   );
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+      {labelAction ? (
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, { fontSize: fs(type.label) }]}>{label}</Text>
+          <Pressable accessibilityRole="button" hitSlop={LINK_HIT_SLOP} onPress={labelAction.onPress}>
+            <Text style={[styles.labelAction, { fontSize: fs(type.label) }]}>{labelAction.label}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Text style={[styles.label, { fontSize: fs(type.label) }]}>{label}</Text>
+      )}
       {revealable ? (
         <View>
           {input}
@@ -137,19 +171,16 @@ export function Field({
             onPress={() => setHidden((value) => !value)}
             style={styles.reveal}
           >
-            <Text style={styles.revealText}>{hidden ? "Show" : "Hide"}</Text>
+            <Text style={[styles.revealText, { fontSize: fs(type.label) }]}>{hidden ? "Show" : "Hide"}</Text>
           </Pressable>
         </View>
       ) : (
         input
       )}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={[styles.error, { fontSize: fs(type.label), lineHeight: fs(18) }]}>{error}</Text> : null}
     </View>
   );
 }
-
-// 4.9:1 on white (WCAG AA asks for 4.5:1).
-const PLACEHOLDER_COLOR = "#6b7466";
 
 // loadingLabel: text shown beside the spinner while loading, e.g.
 // "Signing in…". Without it only the spinner shows.
@@ -166,6 +197,8 @@ export function PrimaryButton({
   loadingLabel?: string;
   onPress: () => void;
 }) {
+  const fs = useFontSize();
+  const textStyle = [styles.buttonText, { fontSize: fs(type.body) }];
   return (
     <Pressable
       accessibilityRole="button"
@@ -181,12 +214,12 @@ export function PrimaryButton({
       {loading && loadingLabel ? (
         <View style={styles.buttonLoading}>
           <ActivityIndicator color={colors.white} />
-          <Text style={styles.buttonText}>{loadingLabel}</Text>
+          <Text style={textStyle}>{loadingLabel}</Text>
         </View>
       ) : loading ? (
         <ActivityIndicator color={colors.white} />
       ) : (
-        <Text style={styles.buttonText}>{label}</Text>
+        <Text style={textStyle}>{label}</Text>
       )}
     </Pressable>
   );
@@ -208,7 +241,9 @@ export function SecondaryButton({
   onPress: () => void;
   tone?: "default" | "danger";
 }) {
+  const fs = useFontSize();
   const color = tone === "danger" ? colors.danger : colors.primary;
+  const borderColor = tone === "danger" ? colors.dangerBorder : colors.inputBorder;
   return (
     <Pressable
       accessibilityRole="button"
@@ -218,7 +253,7 @@ export function SecondaryButton({
       style={({ pressed }) => [
         styles.secondaryButton,
         large ? styles.secondaryButtonLarge : null,
-        { borderColor: color },
+        { borderColor },
         pressed && !disabled && !loading ? styles.buttonPressed : null,
         disabled || loading ? styles.buttonDisabled : null,
       ]}
@@ -226,7 +261,7 @@ export function SecondaryButton({
       {loading ? (
         <ActivityIndicator color={color} />
       ) : (
-        <Text style={[styles.secondaryButtonText, large ? styles.buttonText : null, { color }]}>{label}</Text>
+        <Text style={[styles.secondaryButtonText, { color, fontSize: fs(type.body) }]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -236,11 +271,13 @@ export function Message({
   children,
   tone = "info",
 }: PropsWithChildren<{ tone?: "error" | "info" | "success" }>) {
+  const fs = useFontSize();
   return (
     <Text
       accessibilityRole="alert"
       style={[
         styles.message,
+        { fontSize: fs(14), lineHeight: fs(20) },
         tone === "error" ? styles.error : null,
         tone === "success" ? styles.success : null,
       ]}
@@ -260,6 +297,7 @@ export function InlineLink({
   large?: boolean;
   onPress: () => void;
 }) {
+  const fs = useFontSize();
   return (
     <Pressable
       accessibilityRole="button"
@@ -267,7 +305,7 @@ export function InlineLink({
       onPress={onPress}
       style={[styles.link, large ? styles.linkLarge : null]}
     >
-      <Text style={[styles.linkText, large ? styles.linkTextLarge : null]}>{label}</Text>
+      <Text style={[styles.linkText, { fontSize: fs(large ? type.body : 14) }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -281,33 +319,33 @@ export const uiColors = colors;
 // every screen.
 export const uiStyles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 12,
+    borderRadius: radius.lg,
     borderWidth: 1,
     gap: uiSpace.xs,
     padding: uiSpace.md,
   },
-  sectionHeading: { color: colors.text, fontSize: 18, fontWeight: "700" },
-  cardTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  fieldLabel: { color: colors.text, fontSize: 14, fontWeight: "600" },
-  meta: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  sectionHeading: { color: colors.text, fontSize: type.title, fontWeight: "700" },
+  cardTitle: { color: colors.text, fontSize: type.cardTitle, fontWeight: "700" },
+  fieldLabel: { color: colors.text, fontSize: type.label, fontWeight: "600" },
+  meta: { color: colors.muted, fontSize: type.meta, lineHeight: 18 },
   // Label above its chips or input.
   fieldGroup: { gap: uiSpace.xs },
   // Heading above a list of cards.
   section: { gap: uiSpace.sm },
-  // Selectable chip: 48dp touch target.
+  // Selectable chip: 44dp touch target.
   chip: {
-    backgroundColor: colors.white,
-    borderColor: colors.border,
-    borderRadius: 24,
-    borderWidth: 1.5,
+    backgroundColor: colors.surface,
+    borderColor: colors.inputBorder,
+    borderRadius: radius.pill,
+    borderWidth: 1,
     justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: uiSpace.md,
+    minHeight: touch.min,
+    paddingHorizontal: 14,
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  chipText: { color: colors.text, fontSize: 14, fontWeight: "600" },
   chipTextSelected: { color: colors.white },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: uiSpace.xs },
 });
@@ -346,12 +384,12 @@ const styles = StyleSheet.create({
   },
   offline: {
     alignSelf: "flex-start",
-    backgroundColor: "#fff4d6",
-    borderColor: "#e3c56f",
-    borderRadius: 8,
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    color: "#6b4e00",
-    fontSize: 13,
+    color: colors.warning,
+    fontSize: type.meta,
     fontWeight: "600",
     marginBottom: 10,
     paddingHorizontal: 10,
@@ -359,36 +397,47 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
-    fontSize: 30,
+    fontSize: type.display,
     fontWeight: "700",
+    letterSpacing: -0.3,
   },
   subtitle: {
     color: colors.muted,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: space.xxs,
   },
   body: {
-    gap: 16,
-    marginTop: 28,
+    gap: space.md,
+    marginTop: space.lg,
   },
   field: {
-    gap: 8,
+    gap: 6,
   },
   label: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: type.label,
+    fontWeight: "600",
+  },
+  labelRow: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  labelAction: {
+    color: colors.primary,
+    fontSize: type.label,
     fontWeight: "600",
   },
   input: {
-    backgroundColor: colors.white,
-    borderColor: colors.border,
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderColor: colors.inputBorder,
+    borderRadius: radius.md,
     borderWidth: 1,
     color: colors.text,
-    fontSize: 16,
-    minHeight: 52,
-    paddingHorizontal: 15,
+    fontSize: type.body,
+    minHeight: touch.button,
+    paddingHorizontal: 14,
   },
   inputError: {
     borderColor: colors.danger,
@@ -409,15 +458,15 @@ const styles = StyleSheet.create({
   },
   revealText: {
     color: colors.primary,
-    fontSize: 15,
+    fontSize: type.label,
     fontWeight: "600",
   },
   button: {
     alignItems: "center",
     backgroundColor: colors.primary,
-    borderRadius: 12,
+    borderRadius: radius.md,
     justifyContent: "center",
-    minHeight: 52,
+    minHeight: touch.button,
     paddingHorizontal: 18,
   },
   buttonPressed: {
@@ -433,8 +482,8 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.white,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: type.body,
+    fontWeight: "600",
   },
   message: {
     color: colors.muted,
@@ -450,20 +499,19 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: "center",
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    borderWidth: 1.5,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
     justifyContent: "center",
-    minHeight: 48,
+    minHeight: touch.button,
     paddingHorizontal: 16,
   },
   secondaryButtonLarge: {
-    minHeight: 52,
     paddingHorizontal: 18,
   },
   secondaryButtonText: {
-    fontSize: 15,
-    fontWeight: "700",
+    fontSize: type.body,
+    fontWeight: "600",
   },
   link: {
     alignSelf: "flex-start",
@@ -473,12 +521,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 48,
   },
-  linkTextLarge: {
-    fontSize: 17,
-  },
   linkText: {
     color: colors.primary,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
   },
 });
