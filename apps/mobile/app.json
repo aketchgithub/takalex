@@ -50,7 +50,9 @@
           "isIosBackgroundLocationEnabled": false,
           "isAndroidBackgroundLocationEnabled": false
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
