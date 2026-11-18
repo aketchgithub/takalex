@@ -1,11 +1,14 @@
 import { useEffect } from "react";
 import { AppState, Platform } from "react-native";
 import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import * as Sentry from "@sentry/react-native";
 
 import { cleanupOutboxPhotos } from "@/lib/outbox";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/stores/authStore";
+import { paletteFor } from "@/theme/tokens";
+import { useColorSchemeChoice } from "@/theme/useTheme";
 
 const PROFILE_RETRY_MS = 30_000;
 
@@ -15,6 +18,8 @@ Sentry.init({
 
 export default function RootLayout() {
   const isHydrated = useAuthStore((state) => state.isHydrated);
+  // Light or dark (Account > Display > Appearance, or the phone's setting).
+  const scheme = useColorSchemeChoice();
 
   // Once per app start, whoever signs in: remove outbox photos that no row
   // references. Native only (the outbox is not used on web).
@@ -106,13 +111,17 @@ export default function RootLayout() {
   }, [isHydrated]);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(collector)" />
-      <Stack.Screen name="(manager)" />
-      <Stack.Screen name="(recycler)" />
-      <Stack.Screen name="(admin)" />
-    </Stack>
+    <>
+      {/* Dark status bar icons on the light theme, light ones on the dark theme. */}
+      <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: paletteFor(scheme).background } }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(collector)" />
+        <Stack.Screen name="(manager)" />
+        <Stack.Screen name="(recycler)" />
+        <Stack.Screen name="(admin)" />
+      </Stack>
+    </>
   );
 }

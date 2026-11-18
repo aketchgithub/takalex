@@ -1,7 +1,7 @@
 // The Account tab, the same for every role: who you are (name, role, the
 // collector's group, email, assigned sites), Security (change password; the
 // phone for password reset while SMS reset is switched on), Display (text
-// size, kept on this phone), About (app version) and Sign out. Sites are read
+// size and light/dark appearance, kept on this phone), About (app version) and Sign out. Sites are read
 // from the database under RLS (lib/account.ts).
 
 import Feather from "@expo/vector-icons/Feather";
@@ -10,21 +10,26 @@ import { router } from "expo-router";
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Message, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { Message, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
 import { collectorGroupLabel, loadAccountSummary, type AssignedSite } from "@/lib/account";
 import { appVersionLabel, initials, roleLine, showsAssignedSites } from "@/lib/accountView";
 import { SMS_PASSWORD_RESET } from "@/lib/features";
 import { formatPhone } from "@/lib/phoneNumber";
 import { useAuthStore } from "@/stores/authStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
+import { APPEARANCES } from "@/theme/appearance";
 import { TEXT_SIZES } from "@/theme/textSize";
-import { radius, touch, type } from "@/theme/tokens";
+import { radius, touch, type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 import { roleLabels } from "@/types/auth";
 
 type SitesState = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; sites: AssignedSite[] };
 
 export function AccountScreen() {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   const profile = useAuthStore((state) => state.profile);
   const email = useAuthStore((state) => state.session?.user.email ?? null);
@@ -33,6 +38,10 @@ export function AccountScreen() {
   const signOut = useAuthStore((state) => state.signOut);
   const isSigningOut = useAuthStore((state) => state.isLoading);
   const [sites, setSites] = useState<SitesState>({ status: "loading" });
+  const textSize = usePreferencesStore((state) => state.textSize);
+  const setTextSize = usePreferencesStore((state) => state.setTextSize);
+  const appearance = usePreferencesStore((state) => state.appearance);
+  const setAppearance = usePreferencesStore((state) => state.setAppearance);
 
   const needsSites = profile ? showsAssignedSites(profile.role) : false;
 
@@ -65,16 +74,16 @@ export function AccountScreen() {
           <Text style={[styles.avatarText, { fontSize: fs(type.title) }]}>{initials(profile.full_name)}</Text>
         </View>
         <View style={styles.profileText}>
-          <Text style={[uiStyles.cardTitle, { fontSize: fs(type.cardTitle) }]}>{profile.full_name ?? "Name not set"}</Text>
-          <Text style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>{roleLine(roleLabels[profile.role], group)}</Text>
-          {email ? <Text style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>{email}</Text> : null}
+          <Text style={[ui.cardTitle, { fontSize: fs(type.cardTitle) }]}>{profile.full_name ?? "Name not set"}</Text>
+          <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>{roleLine(roleLabels[profile.role], group)}</Text>
+          {email ? <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>{email}</Text> : null}
         </View>
       </View>
 
       {needsSites ? (
         <Section title="Assigned sites">
           <View style={styles.padded}>
-            {sites.status === "loading" ? <ActivityIndicator color={uiColors.primary} /> : null}
+            {sites.status === "loading" ? <ActivityIndicator color={c.primary} /> : null}
             {sites.status === "error" ? <Message tone="error">{sites.message}</Message> : null}
             {sites.status === "ready" && sites.sites.length === 0 ? (
               <Text style={[styles.value, { fontSize: fs(type.body) }]}>
@@ -113,10 +122,13 @@ export function AccountScreen() {
 
       <Section title="Display">
         <View style={styles.padded}>
-          <Text style={[uiStyles.fieldLabel, { fontSize: fs(type.label) }]}>Text size</Text>
-          <TextSizeControl />
-          <Text style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>
-            Saved on this phone. Your phone&apos;s own font size setting also applies.
+          <Text style={[ui.fieldLabel, { fontSize: fs(type.label) }]}>Text size</Text>
+          <Segmented name="Text size" options={TEXT_SIZES} value={textSize} onChange={setTextSize} />
+          <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>Your phone&apos;s own font size setting also applies.</Text>
+          <Text style={[ui.fieldLabel, styles.spaced, { fontSize: fs(type.label) }]}>Appearance</Text>
+          <Segmented name="Appearance" options={APPEARANCES} value={appearance} onChange={setAppearance} />
+          <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>
+            System follows your phone&apos;s light or dark setting. Both choices are saved on this phone.
           </Text>
         </View>
       </Section>
@@ -124,7 +136,7 @@ export function AccountScreen() {
       <Section title="About">
         <View style={[styles.padded, styles.aboutRow]}>
           <Text style={[styles.value, { fontSize: fs(type.body) }]}>App version</Text>
-          <Text style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>{appVersionLabel(Constants.expoConfig?.version)}</Text>
+          <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>{appVersionLabel(Constants.expoConfig?.version)}</Text>
         </View>
       </Section>
 
@@ -134,6 +146,7 @@ export function AccountScreen() {
 }
 
 function Section({ title, children }: PropsWithChildren<{ title: string }>) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <View style={styles.section}>
@@ -156,6 +169,9 @@ function LinkRow({
   detail?: string;
   onPress: () => void;
 }) {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <Pressable
@@ -165,31 +181,41 @@ function LinkRow({
       onPress={onPress}
       style={({ pressed }) => [styles.linkRow, pressed ? styles.pressed : null]}
     >
-      <Feather color={uiColors.primary} name={icon} size={20} />
+      <Feather color={c.primary} name={icon} size={20} />
       <View style={styles.linkText}>
         <Text style={[styles.value, { fontSize: fs(type.body) }]}>{label}</Text>
-        {detail ? <Text style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>{detail}</Text> : null}
+        {detail ? <Text style={[ui.meta, { fontSize: fs(type.meta) }]}>{detail}</Text> : null}
       </View>
-      <Feather color={uiColors.muted} name="chevron-right" size={20} />
+      <Feather color={c.muted} name="chevron-right" size={20} />
     </Pressable>
   );
 }
 
-function TextSizeControl() {
+// Three side-by-side choices, one selected (Text size, Appearance).
+function Segmented<T extends string>({
+  name,
+  options,
+  value,
+  onChange,
+}: {
+  name: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
-  const textSize = usePreferencesStore((state) => state.textSize);
-  const setTextSize = usePreferencesStore((state) => state.setTextSize);
   return (
     <View accessibilityRole="radiogroup" style={styles.segments}>
-      {TEXT_SIZES.map((option) => {
-        const selected = option.value === textSize;
+      {options.map((option) => {
+        const selected = option.value === value;
         return (
           <Pressable
             key={option.value}
-            accessibilityLabel={`Text size ${option.label}`}
+            accessibilityLabel={`${name} ${option.label}`}
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
-            onPress={() => setTextSize(option.value)}
+            onPress={() => onChange(option.value)}
             style={[styles.segment, selected ? styles.segmentSelected : null]}
           >
             <Text style={[styles.segmentText, selected ? styles.segmentTextSelected : null, { fontSize: fs(type.body) }]}>
@@ -202,50 +228,52 @@ function TextSizeControl() {
   );
 }
 
-const styles = StyleSheet.create({
-  profile: { ...uiStyles.card, alignItems: "center", flexDirection: "row", gap: 14 },
-  avatar: {
-    alignItems: "center",
-    backgroundColor: uiColors.primarySoft,
-    borderRadius: radius.pill,
-    height: 56,
-    justifyContent: "center",
-    width: 56,
-  },
-  avatarText: { color: uiColors.primary, fontWeight: "700" },
-  profileText: { flex: 1, gap: 2 },
-  section: { gap: 8 },
-  sectionTitle: { color: uiColors.muted, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 4 },
-  sectionCard: { ...uiStyles.card, gap: 0, padding: 0, overflow: "hidden" },
-  padded: { gap: 8, padding: 16 },
-  aboutRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  value: { color: uiColors.text },
-  linkRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    minHeight: touch.button + 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  linkText: { flex: 1, gap: 2 },
-  pressed: { backgroundColor: uiColors.background },
-  rowDivider: { backgroundColor: uiColors.divider, height: 1, marginLeft: 48 },
-  segments: {
-    backgroundColor: uiColors.track,
-    borderRadius: radius.md,
-    flexDirection: "row",
-    gap: 4,
-    padding: 4,
-  },
-  segment: {
-    alignItems: "center",
-    borderRadius: radius.sm,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: touch.min,
-  },
-  segmentSelected: { backgroundColor: uiColors.primary },
-  segmentText: { color: uiColors.text, fontWeight: "600" },
-  segmentTextSelected: { color: uiColors.white },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    profile: { ...uiStylesOf(c).card, alignItems: "center", flexDirection: "row", gap: 14 },
+    avatar: {
+      alignItems: "center",
+      backgroundColor: c.primarySoft,
+      borderRadius: radius.pill,
+      height: 56,
+      justifyContent: "center",
+      width: 56,
+    },
+    avatarText: { color: c.primary, fontWeight: "700" },
+    profileText: { flex: 1, gap: 2 },
+    section: { gap: 8 },
+    sectionTitle: { color: c.muted, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 4 },
+    sectionCard: { ...uiStylesOf(c).card, gap: 0, padding: 0, overflow: "hidden" },
+    padded: { gap: 8, padding: 16 },
+    aboutRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+    value: { color: c.text },
+    linkRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 12,
+      minHeight: touch.button + 8,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    linkText: { flex: 1, gap: 2 },
+    pressed: { backgroundColor: c.background },
+    rowDivider: { backgroundColor: c.divider, height: 1, marginLeft: 48 },
+    spaced: { marginTop: 8 },
+    segments: {
+      backgroundColor: c.track,
+      borderRadius: radius.md,
+      flexDirection: "row",
+      gap: 4,
+      padding: 4,
+    },
+    segment: {
+      alignItems: "center",
+      borderRadius: radius.sm,
+      flex: 1,
+      justifyContent: "center",
+      minHeight: touch.min,
+    },
+    segmentSelected: { backgroundColor: c.primary },
+    segmentText: { color: c.text, fontWeight: "600" },
+    segmentTextSelected: { color: c.onPrimary },
+  });

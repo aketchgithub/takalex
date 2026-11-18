@@ -3,21 +3,27 @@
 
 import { StyleSheet, Text, View } from "react-native";
 
-import { uiColors } from "@/components/Ui";
-import { colors } from "@/theme/tokens";
 import type { InvitationDisplayStatus, RequestStatus } from "@/lib/admin/model";
 import { deliveryStatusLabel, type DeliveryStatus } from "@/lib/outbox/presentation";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 export type StatusTone = "amber" | "green" | "red" | "grey";
 
-// Text on its badge background is at least 7:1.
-const TONES: Record<StatusTone, { backgroundColor: string; borderColor: string; color: string }> = {
-  // Soft pill colours from theme/tokens.ts (text passes WCAG AA on its fill).
-  amber: { backgroundColor: colors.warningSoft, borderColor: colors.warningSoft, color: colors.warning },
-  green: { backgroundColor: colors.successSoft, borderColor: colors.successSoft, color: colors.success },
-  red: { backgroundColor: colors.dangerSoft, borderColor: colors.dangerSoft, color: colors.danger },
-  grey: { backgroundColor: colors.divider, borderColor: colors.divider, color: "#3F4A3F" },
-};
+// Soft pill colours from theme/tokens.ts, in the current theme (text passes
+// WCAG AA on its fill).
+function toneColors(c: Palette, tone: StatusTone): { backgroundColor: string; borderColor: string; color: string } {
+  switch (tone) {
+    case "amber":
+      return { backgroundColor: c.warningSoft, borderColor: c.warningSoft, color: c.warning };
+    case "green":
+      return { backgroundColor: c.successSoft, borderColor: c.successSoft, color: c.success };
+    case "red":
+      return { backgroundColor: c.dangerSoft, borderColor: c.dangerSoft, color: c.danger };
+    case "grey":
+      return { backgroundColor: c.divider, borderColor: c.divider, color: c.neutralText };
+  }
+}
 
 export const DELIVERY_TONES: Record<DeliveryStatus, StatusTone> = {
   pending: "amber",
@@ -43,7 +49,8 @@ export const INVITATION_TONES: Record<InvitationDisplayStatus, StatusTone> = {
 };
 
 export function StatusBadge({ label, tone }: { label: string; tone: StatusTone }) {
-  const { backgroundColor, borderColor, color } = TONES[tone];
+  const styles = useThemedStyles(makeStyles);
+  const { backgroundColor, borderColor, color } = toneColors(useColors(), tone);
   return (
     <View style={[styles.badge, { backgroundColor, borderColor }]}>
       <Text style={[styles.badgeText, { color }]}>{label}</Text>
@@ -54,6 +61,7 @@ export function StatusBadge({ label, tone }: { label: string; tone: StatusTone }
 // "Status" on the left, the badge on the right, and an optional note (a
 // rejection reason) as plain text underneath.
 export function StatusRow({ label, tone, note }: { label: string; tone: StatusTone; note?: string | null }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.block}>
       <View accessible accessibilityLabel={`Status: ${label}`} style={styles.row}>
@@ -84,18 +92,19 @@ export function DeliveryStatusRow({
   );
 }
 
-const styles = StyleSheet.create({
-  badge: {
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    borderWidth: 1,
-    flexShrink: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  badgeText: { fontSize: 12, fontWeight: "600" },
-  block: { gap: 4 },
-  row: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
-  rowLabel: { color: uiColors.muted, flexShrink: 0, fontSize: 14 },
-  note: { color: uiColors.text, fontSize: 14, lineHeight: 20 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    badge: {
+      alignSelf: "flex-start",
+      borderRadius: 999,
+      borderWidth: 1,
+      flexShrink: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    badgeText: { fontSize: 12, fontWeight: "600" },
+    block: { gap: 4 },
+    row: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
+    rowLabel: { color: c.muted, flexShrink: 0, fontSize: 14 },
+    note: { color: c.text, fontSize: 14, lineHeight: 20 },
+  });

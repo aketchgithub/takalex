@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { DeliveryRow, ListCard } from "@/components/DeliveryList";
-import { SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { SectionHeading } from "@/components/ReviewUi";
 import { DELIVERY_TONES } from "@/components/StatusBadge";
-import { InlineLink, Message, Screen, SecondaryButton } from "@/components/Ui";
+import { InlineLink, Message, Screen, SecondaryButton, useUiStyles } from "@/components/Ui";
 import { cachedMaterialNames } from "@/lib/collectorContext";
 import { deliveryDetail, deliveryPillLabel, deliveryTitle, friendlyDateTime } from "@/lib/collectorView";
 import { listMyDeliveries } from "@/lib/deliveries";
@@ -26,6 +26,7 @@ type ServerState =
   | { status: "ready"; deliveries: ServerDelivery[] };
 
 export default function DeliveryHistoryScreen() {
+  const ui = useUiStyles();
   const userId = useAuthStore((state) => state.profile?.id ?? null);
   const waiting = useWaitingDeliveries();
   const [server, setServer] = useState<ServerState>({ status: "loading" });
@@ -124,7 +125,7 @@ export default function DeliveryHistoryScreen() {
       {waiting.error ? <Message tone="error">{waiting.error}</Message> : null}
 
       {waiting.rows.length > 0 ? (
-        <View style={reviewStyles.section}>
+        <View style={ui.section}>
           <SectionHeading note="Saved here and not on Takalex yet.">On this phone</SectionHeading>
           <ListCard>
             {waiting.rows.map((row) => {
@@ -142,7 +143,7 @@ export default function DeliveryHistoryScreen() {
                   badge={failed ? { label: "Upload failed", tone: "red" } : { label: "Waiting to upload", tone: "grey" }}
                 >
                   {failed ? <Message tone={status.tone}>{status.text}</Message> : null}
-                  {!failed && row.lastError ? <Text style={reviewStyles.meta}>{row.lastError}</Text> : null}
+                  {!failed && row.lastError ? <Text style={ui.meta}>{row.lastError}</Text> : null}
                   {failed ? (
                     <View style={styles.actions}>
                       <SecondaryButton label="Retry" loading={busy} onPress={() => void retry(row)} />
@@ -161,7 +162,7 @@ export default function DeliveryHistoryScreen() {
         </View>
       ) : null}
 
-      <View style={reviewStyles.section}>
+      <View style={ui.section}>
         <SectionHeading>Sent to Takalex</SectionHeading>
         {server.status === "loading" ? <Message>Loading your deliveries…</Message> : null}
         {server.status === "error" ? (

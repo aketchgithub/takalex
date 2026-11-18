@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
-import { InlineLink, Message, Screen, uiStyles } from "@/components/Ui";
+import { InlineLink, Message, Screen, uiStylesOf } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
 import { firstName, greeting } from "@/lib/collectorView";
 import {
@@ -17,10 +17,13 @@ import {
 } from "@/lib/recycler/model";
 import { useMaterialTotals } from "@/lib/recycler/useMaterialTotals";
 import { useAuthStore } from "@/stores/authStore";
+import type { Palette } from "@/theme/tokens";
+import { useThemedStyles } from "@/theme/useTheme";
 
 const ALL_SITES = "all";
 
 export default function RecyclerHome() {
+  const styles = useThemedStyles(makeStyles);
   const profile = useAuthStore((state) => state.profile);
   const [siteOptions, setSiteOptions] = useState<PublicSiteOption[]>([]);
   const [siteError, setSiteError] = useState<string | null>(null);
@@ -108,8 +111,9 @@ export default function RecyclerHome() {
   );
 }
 
-const styles = StyleSheet.create({
-  filters: { ...uiStyles.card, gap: 8 },
-  label: uiStyles.fieldLabel,
-  hint: uiStyles.meta,
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    filters: { ...uiStylesOf(c).card, gap: 8 },
+    label: uiStylesOf(c).fieldLabel,
+    hint: uiStylesOf(c).meta,
+  });

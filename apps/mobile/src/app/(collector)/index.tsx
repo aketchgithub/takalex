@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { DeliveryRow, ListCard } from "@/components/DeliveryList";
 import { SectionHeading } from "@/components/ReviewUi";
 import { DELIVERY_TONES } from "@/components/StatusBadge";
-import { InlineLink, Message, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { InlineLink, Message, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
 import { loadCollectorContext } from "@/lib/collectorContext";
 import {
   deliveryDetail,
@@ -22,8 +22,9 @@ import { subscribeOutbox, syncNow } from "@/lib/outbox";
 import { deliveries, syncNowOutcome, type Notice, type ServerDelivery } from "@/lib/outbox/presentation";
 import { useWaitingDeliveries } from "@/lib/outbox/useWaitingDeliveries";
 import { useAuthStore } from "@/stores/authStore";
-import { radius, type } from "@/theme/tokens";
+import { radius, type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 type RecentState =
   | { status: "loading" }
@@ -31,6 +32,9 @@ type RecentState =
   | { status: "ready"; deliveries: ServerDelivery[] };
 
 export default function CollectorHome() {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const fs = useFontSize();
   const profile = useAuthStore((state) => state.profile);
@@ -98,12 +102,12 @@ export default function CollectorHome() {
 
   const name = firstName(profile?.full_name);
   const upload = !waiting.loaded
-    ? { icon: "loader" as const, color: uiColors.muted, text: "Checking this phone…" }
+    ? { icon: "loader" as const, color: c.muted, text: "Checking this phone…" }
     : waiting.failed > 0
-      ? { icon: "alert-circle" as const, color: uiColors.danger, text: `${deliveries(waiting.failed)} could not be uploaded` }
+      ? { icon: "alert-circle" as const, color: c.danger, text: `${deliveries(waiting.failed)} could not be uploaded` }
       : total > 0
-        ? { icon: "upload-cloud" as const, color: uiColors.warning, text: `${deliveries(total)} waiting to upload` }
-        : { icon: "check-circle" as const, color: uiColors.success, text: "All deliveries uploaded" };
+        ? { icon: "upload-cloud" as const, color: c.warning, text: `${deliveries(total)} waiting to upload` }
+        : { icon: "check-circle" as const, color: c.success, text: "All deliveries uploaded" };
 
   return (
     <Screen
@@ -125,13 +129,13 @@ export default function CollectorHome() {
         style={({ pressed }) => [styles.record, pressed ? styles.recordPressed : null]}
       >
         <View style={styles.recordIcon}>
-          <Feather color={uiColors.white} name="camera" size={24} />
+          <Feather color={c.onPrimary} name="camera" size={24} />
         </View>
         <View style={styles.recordText}>
           <Text style={[styles.recordTitle, { fontSize: fs(type.title) }]}>Record a delivery</Text>
           <Text style={[styles.recordSubtitle, { fontSize: fs(type.meta) }]}>Photo, material and weight</Text>
         </View>
-        <Feather color={uiColors.white} name="chevron-right" size={22} />
+        <Feather color={c.onPrimary} name="chevron-right" size={22} />
       </Pressable>
 
       <View style={styles.card}>
@@ -147,7 +151,7 @@ export default function CollectorHome() {
         {notice ? <Message tone={notice.tone}>{notice.text}</Message> : null}
       </View>
 
-      <View style={uiStyles.section}>
+      <View style={ui.section}>
         <SectionHeading>Recent deliveries</SectionHeading>
         {recent.status === "loading" ? <Message>Loading your deliveries…</Message> : null}
         {recent.status === "error" ? (
@@ -176,30 +180,31 @@ export default function CollectorHome() {
   );
 }
 
-const styles = StyleSheet.create({
-  record: {
-    alignItems: "center",
-    backgroundColor: uiColors.primary,
-    borderRadius: radius.xl,
-    flexDirection: "row",
-    gap: 14,
-    minHeight: 84,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-  },
-  recordPressed: { backgroundColor: uiColors.primaryPressed },
-  recordIcon: {
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderRadius: radius.pill,
-    height: 48,
-    justifyContent: "center",
-    width: 48,
-  },
-  recordText: { flex: 1, gap: 2 },
-  recordTitle: { color: uiColors.white, fontWeight: "700" },
-  recordSubtitle: { color: "rgba(255,255,255,0.85)" },
-  card: { ...uiStyles.card, gap: 12 },
-  uploadRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  uploadText: { color: uiColors.text, flex: 1, fontWeight: "700" },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    record: {
+      alignItems: "center",
+      backgroundColor: c.primary,
+      borderRadius: radius.xl,
+      flexDirection: "row",
+      gap: 14,
+      minHeight: 84,
+      paddingHorizontal: 18,
+      paddingVertical: 16,
+    },
+    recordPressed: { backgroundColor: c.primaryPressed },
+    recordIcon: {
+      alignItems: "center",
+      backgroundColor: "rgba(255,255,255,0.18)",
+      borderRadius: radius.pill,
+      height: 48,
+      justifyContent: "center",
+      width: 48,
+    },
+    recordText: { flex: 1, gap: 2 },
+    recordTitle: { color: c.onPrimary, fontWeight: "700" },
+    recordSubtitle: { color: c.onPrimary, opacity: 0.85 },
+    card: { ...uiStylesOf(c).card, gap: 12 },
+    uploadRow: { alignItems: "center", flexDirection: "row", gap: 10 },
+    uploadText: { color: c.text, flex: 1, fontWeight: "700" },
+  });

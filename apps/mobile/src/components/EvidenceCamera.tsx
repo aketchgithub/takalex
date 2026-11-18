@@ -5,8 +5,8 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRef, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { uiColors } from "@/components/Ui";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 export type CapturedPhoto = { uri: string; width: number; height: number; capturedAt: Date };
 
@@ -19,6 +19,8 @@ export function EvidenceCamera({
   onCaptured: (photo: CapturedPhoto) => void;
   onCancel: () => void;
 }) {
+  const c = useColors();
+  const styles = useThemedStyles(makeStyles);
   const [permission, requestPermission] = useCameraPermissions();
   const camera = useRef<CameraView>(null);
   const [ready, setReady] = useState(false);
@@ -48,7 +50,7 @@ export function EvidenceCamera({
   if (!permission) {
     body = (
       <View style={styles.centered}>
-        <ActivityIndicator color={uiColors.white} />
+        <ActivityIndicator color={c.white} />
       </View>
     );
   } else if (!permission.granted) {
@@ -88,7 +90,7 @@ export function EvidenceCamera({
             onPress={() => void capture()}
             style={[styles.shutter, !ready || capturing ? styles.disabled : null]}
           >
-            {capturing ? <ActivityIndicator color={uiColors.primary} /> : null}
+            {capturing ? <ActivityIndicator color={c.primary} /> : null}
           </Pressable>
         </View>
       </>
@@ -117,6 +119,7 @@ export function EvidenceCamera({
 }
 
 function CameraButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.button}>
       <Text style={styles.buttonText}>{label}</Text>
@@ -124,32 +127,33 @@ function CameraButton({ label, onPress }: { label: string; onPress: () => void }
   );
 }
 
-const styles = StyleSheet.create({
-  container: { backgroundColor: "#000", flex: 1 },
-  header: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  title: { color: uiColors.white, fontSize: 17, fontWeight: "700" },
-  camera: { flex: 1 },
-  centered: { alignItems: "center", flex: 1, gap: 16, justifyContent: "center", padding: 24 },
-  text: { color: uiColors.white, fontSize: 15, lineHeight: 22, textAlign: "center" },
-  error: { paddingHorizontal: 16, paddingVertical: 8 },
-  controls: { alignItems: "center", paddingVertical: 20 },
-  shutter: {
-    alignItems: "center",
-    backgroundColor: uiColors.white,
-    borderColor: "#cfd6c8",
-    borderRadius: 38,
-    borderWidth: 5,
-    height: 76,
-    justifyContent: "center",
-    width: 76,
-  },
-  disabled: { opacity: 0.5 },
-  button: { paddingHorizontal: 12, paddingVertical: 10 },
-  buttonText: { color: uiColors.white, fontSize: 16, fontWeight: "600" },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    container: { backgroundColor: "#000", flex: 1 },
+    header: {
+      alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    title: { color: c.white, fontSize: 17, fontWeight: "700" },
+    camera: { flex: 1 },
+    centered: { alignItems: "center", flex: 1, gap: 16, justifyContent: "center", padding: 24 },
+    text: { color: c.white, fontSize: 15, lineHeight: 22, textAlign: "center" },
+    error: { paddingHorizontal: 16, paddingVertical: 8 },
+    controls: { alignItems: "center", paddingVertical: 20 },
+    shutter: {
+      alignItems: "center",
+      backgroundColor: c.white,
+      borderColor: "#cfd6c8",
+      borderRadius: 38,
+      borderWidth: 5,
+      height: 76,
+      justifyContent: "center",
+      width: 76,
+    },
+    disabled: { opacity: 0.5 },
+    button: { paddingHorizontal: 12, paddingVertical: 10 },
+    buttonText: { color: c.white, fontSize: 16, fontWeight: "600" },
+  });

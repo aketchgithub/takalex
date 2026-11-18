@@ -6,7 +6,6 @@ import { FilterChips } from "@/components/FilterChips";
 import { CardHeader } from "@/components/AdminList";
 import { Card, Row } from "@/components/ReviewUi";
 import { REQUEST_TONES } from "@/components/StatusBadge";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
 import {
   REQUEST_FILTERS,
   checkRejectionNote,
@@ -18,8 +17,11 @@ import {
   type AccessRequestRow,
   type RequestFilter,
 } from "@/lib/admin/model";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
 import { listAccessRequests, rejectAccessRequest } from "@/lib/admin/requests";
 import { friendlyDateTime } from "@/lib/collectorView";
+import type { Palette } from "@/theme/tokens";
+import { useThemedStyles } from "@/theme/useTheme";
 import { roleLabels } from "@/types/auth";
 
 type ListState =
@@ -99,6 +101,7 @@ function RequestCard({
   onApprove: () => void;
   onChanged: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -181,7 +184,8 @@ function RequestCard({
   );
 }
 
-const styles = StyleSheet.create({
-  actions: { gap: 12, marginTop: 8 },
-  warning: { color: uiColors.danger, fontSize: 13, lineHeight: 18 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    actions: { gap: 12, marginTop: 8 },
+    warning: { color: c.danger, fontSize: 13, lineHeight: 18 },
+  });

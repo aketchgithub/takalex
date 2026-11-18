@@ -8,11 +8,13 @@ import Feather from "@expo/vector-icons/Feather";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { StatusBadge, type StatusTone } from "@/components/StatusBadge";
-import { uiColors, uiStyles } from "@/components/Ui";
-import { type } from "@/theme/tokens";
+import { uiStylesOf, useUiStyles } from "@/components/Ui";
+import { type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 export function ListCard({ children }: PropsWithChildren) {
+  const styles = useThemedStyles(makeStyles);
   const rows = Children.toArray(children).filter(Boolean);
   return (
     <View style={styles.card}>
@@ -42,6 +44,9 @@ export function DeliveryRow({
   onPress?: () => void;
   accessibilityHint?: string;
 }) {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   const lines = Array.isArray(detail) ? detail : [detail];
   const label = `${title}. ${lines.join(". ")}. ${badge.label}`;
@@ -50,13 +55,13 @@ export function DeliveryRow({
       <View style={styles.text}>
         <Text style={[styles.title, { fontSize: fs(type.body) }]}>{title}</Text>
         {lines.map((line, index) => (
-          <Text key={index} style={[uiStyles.meta, { fontSize: fs(type.meta) }]}>
+          <Text key={index} style={[ui.meta, { fontSize: fs(type.meta) }]}>
             {line}
           </Text>
         ))}
       </View>
       <StatusBadge label={badge.label} tone={badge.tone} />
-      {onPress ? <Feather color={uiColors.muted} name="chevron-right" size={20} /> : null}
+      {onPress ? <Feather color={c.muted} name="chevron-right" size={20} /> : null}
     </>
   );
   if (onPress) {
@@ -84,12 +89,13 @@ export function DeliveryRow({
   );
 }
 
-const styles = StyleSheet.create({
-  card: { ...uiStyles.card, gap: 0, overflow: "hidden", padding: 0 },
-  divider: { backgroundColor: uiColors.divider, height: 1, marginHorizontal: 16 },
-  row: { gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
-  top: { alignItems: "center", flexDirection: "row", gap: 12 },
-  text: { flex: 1, gap: 2 },
-  title: { color: uiColors.text, fontWeight: "700" },
-  pressed: { backgroundColor: uiColors.background },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: { ...uiStylesOf(c).card, gap: 0, overflow: "hidden", padding: 0 },
+    divider: { backgroundColor: c.divider, height: 1, marginHorizontal: 16 },
+    row: { gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+    top: { alignItems: "center", flexDirection: "row", gap: 12 },
+    text: { flex: 1, gap: 2 },
+    title: { color: c.text, fontWeight: "700" },
+    pressed: { backgroundColor: c.background },
+  });

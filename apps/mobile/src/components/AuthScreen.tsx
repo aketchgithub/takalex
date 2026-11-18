@@ -2,8 +2,9 @@ import type { PropsWithChildren } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { colors, radius, space, type } from "@/theme/tokens";
+import { radius, space, type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useThemedStyles } from "@/theme/useTheme";
 
 // The signed-out form screens (sign in, activate, forgot password, request
 // access): the Takalex mark, title and form in one centred card, and the way
@@ -22,6 +23,7 @@ export function AuthScreen({
   // The way back, e.g. "Back to home" or "Back to sign in".
   footer?: { label: string; onPress: () => void };
 }>) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -71,6 +73,7 @@ export function AuthScreen({
 
 // A thin rule with a short label in the middle, e.g. "New to Takalex?".
 export function Divider({ label }: { label: string }) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <View style={styles.dividerRow}>
@@ -81,52 +84,53 @@ export function Divider({ label }: { label: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { backgroundColor: colors.background, flex: 1 },
-  fill: { flex: 1 },
-  scroll: {
-    flexGrow: 1,
-    paddingHorizontal: space.md + space.xxs,
-    paddingTop: space.lg,
-    paddingBottom: space.md,
-  },
-  middle: { flexGrow: 1, justifyContent: "center" },
-  card: {
-    alignSelf: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    elevation: 2,
-    gap: 18,
-    maxWidth: 440,
-    paddingHorizontal: space.md + space.xxs,
-    paddingVertical: space.lg,
-    shadowColor: colors.text,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    width: "100%",
-  },
-  brandRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  mark: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  markText: { color: colors.white, fontSize: 20, fontWeight: "800" },
-  brandName: { color: colors.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.2 },
-  brandBy: { color: colors.muted, fontSize: type.caption },
-  heading: { gap: space.xxs },
-  title: { color: colors.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
-  subtitle: { color: colors.muted, fontSize: 14, lineHeight: 20 },
-  body: { gap: 14 },
-  footer: { alignSelf: "center", marginTop: space.md, paddingHorizontal: space.md, paddingVertical: space.sm },
-  footerText: { color: colors.muted, fontSize: 14, fontWeight: "500" },
-  dividerRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  dividerLine: { backgroundColor: colors.border, flexGrow: 1, height: 1 },
-  dividerText: { color: colors.muted, fontSize: type.caption },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    safeArea: { backgroundColor: c.background, flex: 1 },
+    fill: { flex: 1 },
+    scroll: {
+      flexGrow: 1,
+      paddingHorizontal: space.md + space.xxs,
+      paddingTop: space.lg,
+      paddingBottom: space.md,
+    },
+    middle: { flexGrow: 1, justifyContent: "center" },
+    card: {
+      alignSelf: "center",
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      borderRadius: radius.xl,
+      borderWidth: 1,
+      elevation: 2,
+      gap: 18,
+      maxWidth: 440,
+      paddingHorizontal: space.md + space.xxs,
+      paddingVertical: space.lg,
+      shadowColor: c.text,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 12,
+      width: "100%",
+    },
+    brandRow: { alignItems: "center", flexDirection: "row", gap: 10 },
+    mark: {
+      alignItems: "center",
+      backgroundColor: c.primary,
+      borderRadius: radius.lg,
+      height: 40,
+      justifyContent: "center",
+      width: 40,
+    },
+    markText: { color: c.onPrimary, fontSize: 20, fontWeight: "800" },
+    brandName: { color: c.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.2 },
+    brandBy: { color: c.muted, fontSize: type.caption },
+    heading: { gap: space.xxs },
+    title: { color: c.text, fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
+    subtitle: { color: c.muted, fontSize: 14, lineHeight: 20 },
+    body: { gap: 14 },
+    footer: { alignSelf: "center", marginTop: space.md, paddingHorizontal: space.md, paddingVertical: space.sm },
+    footerText: { color: c.muted, fontSize: 14, fontWeight: "500" },
+    dividerRow: { alignItems: "center", flexDirection: "row", gap: 10 },
+    dividerLine: { backgroundColor: c.border, flexGrow: 1, height: 1 },
+    dividerText: { color: c.muted, fontSize: type.caption },
+  });

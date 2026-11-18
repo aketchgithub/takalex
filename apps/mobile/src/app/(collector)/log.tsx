@@ -4,17 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { EvidenceCamera, type CapturedPhoto } from "@/components/EvidenceCamera";
-import {
-  Field,
-  InlineLink,
-  Message,
-  PrimaryButton,
-  Screen,
-  SecondaryButton,
-  type ScreenScrollView,
-  uiColors,
-  uiStyles,
-} from "@/components/Ui";
+import { Field, InlineLink, Message, PrimaryButton, Screen, type ScreenScrollView, SecondaryButton, uiStylesOf } from "@/components/Ui";
 import { loadCollectorContext, type CollectorContext } from "@/lib/collectorContext";
 import { getOutboxRow, saveSubmission } from "@/lib/outbox";
 import { deleteTemporaryPhoto } from "@/lib/outbox/photo";
@@ -22,12 +12,15 @@ import { formatDateTime, noticeAutoDismissMs, submitOutcome, type Notice } from 
 import { normalizeReportedWeight } from "@/lib/outbox/validation";
 import { locationMessage, useDeliveryLocation } from "@/lib/useDeliveryLocation";
 import { useAuthStore } from "@/stores/authStore";
-import { radius, type } from "@/theme/tokens";
+import { radius, type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 const WEIGHT_ERROR = "Enter a weight above 0 kg with at most two decimals, for example 12.5.";
 
 export default function NewDeliveryScreen() {
+  const c = useColors();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const profile = useAuthStore((state) => state.profile);
 
@@ -195,7 +188,7 @@ export default function NewDeliveryScreen() {
 
       <View style={styles.card}>
         <View style={styles.siteRow}>
-          <Feather color={uiColors.primary} name="map-pin" size={20} />
+          <Feather color={c.primary} name="map-pin" size={20} />
           <View style={styles.siteText}>
             <Text style={styles.label}>Site</Text>
             {site ? <Text style={[styles.value, { fontSize: fs(type.cardTitle) }]}>{site.name}</Text> : null}
@@ -274,14 +267,14 @@ export default function NewDeliveryScreen() {
             onPress={openCamera}
             style={({ pressed }) => [styles.photoBox, pressed ? styles.photoBoxPressed : null]}
           >
-            <Feather color={uiColors.primary} name="camera" size={28} />
+            <Feather color={c.primary} name="camera" size={28} />
             <Text style={[styles.photoTitle, { fontSize: fs(type.body) }]}>Take photo</Text>
             <Text style={[styles.hint, { fontSize: fs(type.meta) }]}>Show the whole delivery clearly.</Text>
           </Pressable>
         )}
         <View style={styles.locationRow}>
           <Feather
-            color={location.state.status === "ready" ? uiColors.success : uiColors.muted}
+            color={location.state.status === "ready" ? c.success : c.muted}
             name={location.state.status === "unavailable" ? "map-pin" : location.state.status === "ready" ? "check-circle" : "loader"}
             size={16}
           />
@@ -311,37 +304,38 @@ export default function NewDeliveryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  card: uiStyles.card,
-  // Saved or uploaded: green card. A failure: red border.
-  noticeCard: { ...uiStyles.card, backgroundColor: uiColors.primarySoft, borderColor: uiColors.primary, borderWidth: 1.5 },
-  noticeCardError: { backgroundColor: uiColors.white, borderColor: uiColors.danger },
-  section: uiStyles.fieldGroup,
-  label: uiStyles.fieldLabel,
-  value: uiStyles.sectionHeading,
-  hint: uiStyles.meta,
-  options: uiStyles.chipRow,
-  option: uiStyles.chip,
-  optionSelected: uiStyles.chipSelected,
-  optionText: uiStyles.chipText,
-  optionTextSelected: uiStyles.chipTextSelected,
-  preview: { backgroundColor: uiColors.border, borderRadius: 12, width: "100%" },
-  siteRow: { alignItems: "center", flexDirection: "row", gap: 12 },
-  siteText: { flex: 1, gap: 2 },
-  photoBox: {
-    alignItems: "center",
-    backgroundColor: uiColors.surface,
-    borderColor: uiColors.inputBorder,
-    borderRadius: radius.lg,
-    borderStyle: "dashed",
-    borderWidth: 1.5,
-    gap: 4,
-    justifyContent: "center",
-    minHeight: 128,
-    padding: 16,
-  },
-  photoBoxPressed: { backgroundColor: uiColors.primarySoft },
-  photoTitle: { color: uiColors.primary, fontWeight: "700" },
-  locationRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
-  locationText: { flex: 1 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: uiStylesOf(c).card,
+    // Saved or uploaded: green card. A failure: red border.
+    noticeCard: { ...uiStylesOf(c).card, backgroundColor: c.primarySoft, borderColor: c.primary, borderWidth: 1.5 },
+    noticeCardError: { backgroundColor: c.surface, borderColor: c.danger },
+    section: uiStylesOf(c).fieldGroup,
+    label: uiStylesOf(c).fieldLabel,
+    value: uiStylesOf(c).sectionHeading,
+    hint: uiStylesOf(c).meta,
+    options: uiStylesOf(c).chipRow,
+    option: uiStylesOf(c).chip,
+    optionSelected: uiStylesOf(c).chipSelected,
+    optionText: uiStylesOf(c).chipText,
+    optionTextSelected: uiStylesOf(c).chipTextSelected,
+    preview: { backgroundColor: c.border, borderRadius: 12, width: "100%" },
+    siteRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+    siteText: { flex: 1, gap: 2 },
+    photoBox: {
+      alignItems: "center",
+      backgroundColor: c.surface,
+      borderColor: c.inputBorder,
+      borderRadius: radius.lg,
+      borderStyle: "dashed",
+      borderWidth: 1.5,
+      gap: 4,
+      justifyContent: "center",
+      minHeight: 128,
+      padding: 16,
+    },
+    photoBoxPressed: { backgroundColor: c.primarySoft },
+    photoTitle: { color: c.primary, fontWeight: "700" },
+    locationRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
+    locationText: { flex: 1 },
+  });

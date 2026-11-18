@@ -1,7 +1,9 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { uiStyles } from "@/components/Ui";
+import { uiStylesOf } from "@/components/Ui";
+import type { Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useThemedStyles } from "@/theme/useTheme";
 
 // The selected chip shows a check mark as well as its colour, so selection
 // does not rely on colour alone. scrollable: one row that scrolls sideways
@@ -17,6 +19,7 @@ export function FilterChips<T extends string>({
   onChange: (value: T) => void;
   scrollable?: boolean;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   const chips = options.map((option) => {
     const selected = option.value === value;
@@ -57,11 +60,12 @@ export function FilterChips<T extends string>({
   );
 }
 
-const styles = StyleSheet.create({
-  row: uiStyles.chipRow,
-  scrollRow: { ...uiStyles.chipRow, flexWrap: "nowrap" },
-  chip: uiStyles.chip,
-  selected: uiStyles.chipSelected,
-  text: uiStyles.chipText,
-  selectedText: uiStyles.chipTextSelected,
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: uiStylesOf(c).chipRow,
+    scrollRow: { ...uiStylesOf(c).chipRow, flexWrap: "nowrap" },
+    chip: uiStylesOf(c).chip,
+    selected: uiStylesOf(c).chipSelected,
+    text: uiStylesOf(c).chipText,
+    selectedText: uiStylesOf(c).chipTextSelected,
+  });

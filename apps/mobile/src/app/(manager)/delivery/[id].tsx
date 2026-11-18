@@ -2,9 +2,9 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { Card, Row, SectionHeading } from "@/components/ReviewUi";
 import { DeliveryStatusRow } from "@/components/StatusBadge";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
 import { friendlyDateTime } from "@/lib/collectorView";
 import { formatKg } from "@/lib/outbox/presentation";
 import {
@@ -25,6 +25,8 @@ import {
   type BreakdownLine,
   type VerifiableMaterial,
 } from "@/lib/review/model";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 // A Stack screen: every open pushes a new instance and Back unmounts it, so
 // each visit starts with fresh state, a fresh read and a fresh signed URL.
@@ -48,6 +50,7 @@ type DetailState =
   | { status: "ready"; delivery: DeliveryDetail };
 
 function DeliveryContent({ id }: { id: string }) {
+  const ui = useUiStyles();
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ status: "loading" });
   const [version, setVersion] = useState(0);
@@ -111,7 +114,7 @@ function DeliveryContent({ id }: { id: string }) {
         {delivery.verifiedAt ? <Row label="Reviewed" value={friendlyDateTime(delivery.verifiedAt, now)} /> : null}
       </Card>
 
-      <View style={reviewStyles.section}>
+      <View style={ui.section}>
         <SectionHeading note="Reported by the collector and their phone. Not verified.">
           What the collector recorded
         </SectionHeading>
@@ -140,6 +143,9 @@ function DeliveryContent({ id }: { id: string }) {
 }
 
 function EvidencePhoto({ delivery, now }: { delivery: DeliveryDetail; now: Date }) {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const photo = delivery.evidence[0] ?? null;
   const storagePath = photo?.storagePath ?? null;
   const [url, setUrl] = useState<string | null>(null);
@@ -174,7 +180,7 @@ function EvidencePhoto({ delivery, now }: { delivery: DeliveryDetail; now: Date 
   };
 
   return (
-    <View style={reviewStyles.section}>
+    <View style={ui.section}>
       <SectionHeading
         note={photo?.capturedAt ? `Taken ${friendlyDateTime(photo.capturedAt, now)} (device-reported)` : undefined}
       >
@@ -183,7 +189,7 @@ function EvidencePhoto({ delivery, now }: { delivery: DeliveryDetail; now: Date 
       {!photo ? (
         <Message>Waiting for the collector’s photo to upload.</Message>
       ) : null}
-      {loading ? <ActivityIndicator color={uiColors.primary} /> : null}
+      {loading ? <ActivityIndicator color={c.primary} /> : null}
       {error ? <Message tone="error">{error}</Message> : null}
       {url && !loading ? (
         <Image
@@ -199,7 +205,7 @@ function EvidencePhoto({ delivery, now }: { delivery: DeliveryDetail; now: Date 
       ) : null}
       {photo ? <InlineLink label="Reload photo" onPress={load} /> : null}
       {delivery.evidence.length > 1 ? (
-        <Text style={reviewStyles.meta}>{delivery.evidence.length} photos were uploaded; the first is shown.</Text>
+        <Text style={ui.meta}>{delivery.evidence.length} photos were uploaded; the first is shown.</Text>
       ) : null}
     </View>
   );
@@ -217,6 +223,8 @@ type MaterialsState =
   | { status: "ready"; materials: VerifiableMaterial[] };
 
 function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: () => void }) {
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const [materials, setMaterials] = useState<MaterialsState>({ status: "loading" });
   const [materialsVersion, setMaterialsVersion] = useState(0);
   const [lines, setLines] = useState<BreakdownLine[]>(() => [newLine()]);
@@ -305,7 +313,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
 
   return (
     <>
-      <View style={reviewStyles.section}>
+      <View style={ui.section}>
         <SectionHeading note="Sort and weigh the delivery, then record each material and its verified weight.">
           Verified breakdown
         </SectionHeading>
@@ -324,7 +332,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
               return (
                 <Card key={line.key}>
                   <View style={styles.lineHeader}>
-                    <Text style={reviewStyles.title}>Line {index + 1}</Text>
+                    <Text style={ui.cardTitle}>Line {index + 1}</Text>
                     {lines.length > 1 ? (
                       <InlineLink
                         label="Remove"
@@ -377,7 +385,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
             />
             <Card>
               <Row label="Verified total" value={`${check.totalText} kg`} />
-              <Text style={reviewStyles.meta}>
+              <Text style={ui.meta}>
                 Sum of {check.countedLines} of {lines.length} line{lines.length === 1 ? "" : "s"} with a valid weight.
                 Reported by collector: {formatKg(delivery.reportedWeightKg)}.
               </Text>
@@ -428,22 +436,23 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
   );
 }
 
-const styles = StyleSheet.create({
-  photo: {
-    aspectRatio: 3 / 4,
-    backgroundColor: uiColors.track,
-    borderRadius: 12,
-    width: "100%",
-  },
-  lineHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  label: uiStyles.fieldLabel,
-  chips: uiStyles.chipRow,
-  chip: uiStyles.chip,
-  chipSelected: uiStyles.chipSelected,
-  chipDisabled: { opacity: 0.4 },
-  chipText: uiStyles.chipText,
-  chipTextSelected: uiStyles.chipTextSelected,
-  // Rejecting is its own card, set apart from the approve section above.
-  rejectCard: { ...uiStyles.card, borderColor: uiColors.danger, gap: 12, marginTop: 8 },
-  error: { color: uiColors.danger, fontSize: 14 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    photo: {
+      aspectRatio: 3 / 4,
+      backgroundColor: c.track,
+      borderRadius: 12,
+      width: "100%",
+    },
+    lineHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+    label: uiStylesOf(c).fieldLabel,
+    chips: uiStylesOf(c).chipRow,
+    chip: uiStylesOf(c).chip,
+    chipSelected: uiStylesOf(c).chipSelected,
+    chipDisabled: { opacity: 0.4 },
+    chipText: uiStylesOf(c).chipText,
+    chipTextSelected: uiStylesOf(c).chipTextSelected,
+    // Rejecting is its own card, set apart from the approve section above.
+    rejectCard: { ...uiStylesOf(c).card, borderColor: c.danger, gap: 12, marginTop: 8 },
+    error: { color: c.danger, fontSize: 14 },
+  });

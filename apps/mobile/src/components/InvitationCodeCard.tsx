@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Share, StyleSheet, Text, View } from "react-native";
 
-import { InlineLink, Message, PrimaryButton, Screen, uiColors } from "@/components/Ui";
+import { InlineLink, Message, PrimaryButton, Screen } from "@/components/Ui";
 import { formatExpiry, inviteShareMessage } from "@/lib/admin/model";
+import type { Palette } from "@/theme/tokens";
+import { useThemedStyles } from "@/theme/useTheme";
 import { roleLabels, type InviteRole } from "@/types/auth";
 
 // A just-issued invitation code. Lives only in the parent screen's state;
@@ -30,6 +32,7 @@ export function InvitationCodeCard({
   brand?: boolean;
   onDone: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const [shareError, setShareError] = useState<string | null>(null);
 
   async function share() {
@@ -75,23 +78,24 @@ export function InvitationCodeCard({
   );
 }
 
-const styles = StyleSheet.create({
-  codeCard: {
-    alignItems: "center",
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.primary,
-    borderRadius: 12,
-    borderWidth: 2,
-    gap: 8,
-    padding: 24,
-  },
-  codeLabel: { color: uiColors.muted, fontSize: 13, fontWeight: "600" },
-  code: {
-    color: uiColors.text,
-    fontFamily: "monospace",
-    fontSize: 28,
-    fontWeight: "800",
-    letterSpacing: 2,
-  },
-  codeMeta: { color: uiColors.muted, fontSize: 13 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    codeCard: {
+      alignItems: "center",
+      backgroundColor: c.surface,
+      borderColor: c.primary,
+      borderRadius: 12,
+      borderWidth: 2,
+      gap: 8,
+      padding: 24,
+    },
+    codeLabel: { color: c.muted, fontSize: 13, fontWeight: "600" },
+    code: {
+      color: c.text,
+      fontFamily: "monospace",
+      fontSize: 28,
+      fontWeight: "800",
+      letterSpacing: 2,
+    },
+    codeMeta: { color: c.muted, fontSize: 13 },
+  });

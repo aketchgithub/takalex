@@ -3,7 +3,6 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { router } from "expo-router";
 
 import { AuthScreen } from "@/components/AuthScreen";
-import { Field, Message, PrimaryButton, uiColors, uiStyles } from "@/components/Ui";
 import {
   getPublicSiteOptions,
   submitAccessRequest,
@@ -11,6 +10,9 @@ import {
   type AccessRequestRole,
   type PublicSiteOption,
 } from "@/lib/access";
+import { Field, Message, PrimaryButton, uiStylesOf } from "@/components/Ui";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 const ROLE_OPTIONS: { value: AccessRequestRole; label: string }[] = [
   { value: "collector", label: "Collector" },
@@ -19,6 +21,8 @@ const ROLE_OPTIONS: { value: AccessRequestRole; label: string }[] = [
 ];
 
 export default function RequestAccessScreen() {
+  const c = useColors();
+  const styles = useThemedStyles(makeStyles);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -195,7 +199,7 @@ export default function RequestAccessScreen() {
           <Text style={styles.hint}>Each waste picker group has the same name as its site.</Text>
         ) : null}
         {sitesLoading ? (
-          <ActivityIndicator color={uiColors.primary} />
+          <ActivityIndicator color={c.primary} />
         ) : sitesError ? (
           <>
             <Message tone="error">{sitesError}</Message>
@@ -259,22 +263,23 @@ export default function RequestAccessScreen() {
 }
 
 // Matches the Field label and input styling in src/components/Ui.tsx.
-const styles = StyleSheet.create({
-  roleField: {
-    gap: 6,
-  },
-  roleLabel: uiStyles.fieldLabel,
-  hint: uiStyles.meta,
-  roleOptions: uiStyles.chipRow,
-  roleOption: {
-    ...uiStyles.chip,
-    alignItems: "center",
-    flexGrow: 1,
-  },
-  roleOptionSelected: uiStyles.chipSelected,
-  roleOptionPressed: {
-    opacity: 0.85,
-  },
-  roleOptionText: uiStyles.chipText,
-  roleOptionTextSelected: uiStyles.chipTextSelected,
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    roleField: {
+      gap: 6,
+    },
+    roleLabel: uiStylesOf(c).fieldLabel,
+    hint: uiStylesOf(c).meta,
+    roleOptions: uiStylesOf(c).chipRow,
+    roleOption: {
+      ...uiStylesOf(c).chip,
+      alignItems: "center",
+      flexGrow: 1,
+    },
+    roleOptionSelected: uiStylesOf(c).chipSelected,
+    roleOptionPressed: {
+      opacity: 0.85,
+    },
+    roleOptionText: uiStylesOf(c).chipText,
+    roleOptionTextSelected: uiStylesOf(c).chipTextSelected,
+  });

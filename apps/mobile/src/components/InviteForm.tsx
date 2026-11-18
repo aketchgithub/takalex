@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { z } from "zod";
 
-import { Field, Message, PrimaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { Field, Message, PrimaryButton, uiStylesOf } from "@/components/Ui";
 import { NO_EMAIL_NOTE, requestEmailError, type InvitePrefill } from "@/lib/admin/model";
 import { getActiveSites, type SiteOption } from "@/lib/sites";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 import { roleLabels, type InviteRole } from "@/types/auth";
 
 // Same limits as invite-user.
@@ -42,6 +44,8 @@ export function InviteForm({
   loading: boolean;
   onSubmit: (values: InviteValues) => Promise<string | null>;
 }) {
+  const c = useColors();
+  const styles = useThemedStyles(makeStyles);
   const [email, setEmail] = useState(initial?.email ?? "");
   const [fullName, setFullName] = useState(initial?.fullName ?? "");
   const [role, setRole] = useState<InviteRole>(initial?.role ?? "collector");
@@ -196,7 +200,7 @@ export function InviteForm({
         {siteNotice ? <Message tone="error">{siteNotice}</Message> : null}
 
         {isLoadingSites ? (
-          <ActivityIndicator color={uiColors.primary} />
+          <ActivityIndicator color={c.primary} />
         ) : siteError ? (
           <Message tone="error">{siteError}</Message>
         ) : sites.length === 0 ? (
@@ -240,51 +244,52 @@ export function InviteForm({
   );
 }
 
-const styles = StyleSheet.create({
-  section: uiStyles.fieldGroup,
-  sectionTitle: uiStyles.sectionHeading,
-  helper: uiStyles.meta,
-  option: {
-    alignItems: "center",
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 16,
-  },
-  optionSelected: { borderColor: uiColors.primary, borderWidth: 2 },
-  optionContent: { flex: 1, gap: 4 },
-  optionTitle: { color: uiColors.text, fontSize: 15, fontWeight: "700" },
-  optionDescription: { color: uiColors.muted, fontSize: 13 },
-  radio: { borderColor: uiColors.border, borderRadius: 10, borderWidth: 2, height: 20, marginLeft: 12, width: 20 },
-  siteRadio: { marginLeft: 0 },
-  radioSelected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
-  siteOption: {
-    alignItems: "center",
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  siteOptionSelected: { borderColor: uiColors.primary },
-  checkbox: {
-    alignItems: "center",
-    borderColor: uiColors.border,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    height: 21,
-    justifyContent: "center",
-    width: 21,
-  },
-  checkboxSelected: { backgroundColor: uiColors.primary, borderColor: uiColors.primary },
-  checkmark: { color: uiColors.white, fontSize: 14, fontWeight: "800" },
-  siteName: { color: uiColors.text, flex: 1, fontSize: 14, fontWeight: "500" },
-  selectionCount: { color: uiColors.muted, fontSize: 13 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    section: uiStylesOf(c).fieldGroup,
+    sectionTitle: uiStylesOf(c).sectionHeading,
+    helper: uiStylesOf(c).meta,
+    option: {
+      alignItems: "center",
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      padding: 16,
+    },
+    optionSelected: { borderColor: c.primary, borderWidth: 2 },
+    optionContent: { flex: 1, gap: 4 },
+    optionTitle: { color: c.text, fontSize: 15, fontWeight: "700" },
+    optionDescription: { color: c.muted, fontSize: 13 },
+    radio: { borderColor: c.border, borderRadius: 10, borderWidth: 2, height: 20, marginLeft: 12, width: 20 },
+    siteRadio: { marginLeft: 0 },
+    radioSelected: { backgroundColor: c.primary, borderColor: c.primary },
+    siteOption: {
+      alignItems: "center",
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 12,
+      minHeight: 48,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    siteOptionSelected: { borderColor: c.primary },
+    checkbox: {
+      alignItems: "center",
+      borderColor: c.border,
+      borderRadius: 5,
+      borderWidth: 1.5,
+      height: 21,
+      justifyContent: "center",
+      width: 21,
+    },
+    checkboxSelected: { backgroundColor: c.primary, borderColor: c.primary },
+    checkmark: { color: c.onPrimary, fontSize: 14, fontWeight: "800" },
+    siteName: { color: c.text, flex: 1, fontSize: 14, fontWeight: "500" },
+    selectionCount: { color: c.muted, fontSize: 13 },
+  });

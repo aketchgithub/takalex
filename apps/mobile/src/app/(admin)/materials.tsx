@@ -4,8 +4,7 @@ import { Alert, StyleSheet, Switch, Text, View } from "react-native";
 
 import { AddToggle, ExpandableRow, IconButton } from "@/components/AdminList";
 import { ListCard } from "@/components/DeliveryList";
-import { reviewStyles } from "@/components/ReviewUi";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
+
 import {
   deactivateMaterialConfirmation,
   deleteMaterialConfirmation,
@@ -20,7 +19,10 @@ import {
   type AdminMaterial,
   type MaterialRoles,
 } from "@/lib/admin/materialModel";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, useUiStyles } from "@/components/Ui";
 import { createMaterial, deleteMaterial, listAllMaterials, moveMaterial, updateMaterial } from "@/lib/admin/materials";
+import type { Palette } from "@/theme/tokens";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 type ListState =
   | { status: "loading" }
@@ -116,6 +118,9 @@ function RoleSwitches({
   code?: string;
   onChange: (roles: MaterialRoles) => void;
 }) {
+  const c = useColors();
+  const ui = useUiStyles();
+  const styles = useThemedStyles(makeStyles);
   const mixed = code === MIXED_CODE;
   const rows: { key: keyof MaterialRoles; label: string; locked: boolean }[] = [
     { key: "isReportable", label: "Collectors can report it", locked: false },
@@ -131,13 +136,13 @@ function RoleSwitches({
             accessibilityLabel={row.label}
             disabled={row.locked}
             onValueChange={(on) => onChange(withRole(roles, row.key, on))}
-            thumbColor={uiColors.white}
-            trackColor={{ false: uiColors.border, true: uiColors.primary }}
+            thumbColor={c.white}
+            trackColor={{ false: c.inputBorder, true: c.primary }}
             value={roles[row.key]}
           />
         </View>
       ))}
-      {mixed ? <Text style={reviewStyles.meta}>Mixed is only for unsorted deliveries reported by collectors.</Text> : null}
+      {mixed ? <Text style={ui.meta}>Mixed is only for unsorted deliveries reported by collectors.</Text> : null}
     </View>
   );
 }
@@ -216,6 +221,7 @@ function MaterialRow({
   onToggle: () => void;
   onChanged: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const current: MaterialRoles = {
     isReportable: material.isReportable,
     isVerifiable: material.isVerifiable,
@@ -367,11 +373,12 @@ function MaterialRow({
   );
 }
 
-const styles = StyleSheet.create({
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  move: { flexDirection: "row", gap: 6 },
-  switches: { gap: 4 },
-  switchRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 44, gap: 12 },
-  switchLabel: { color: uiColors.text, flexShrink: 1, fontSize: 15 },
-  locked: { color: uiColors.muted },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    move: { flexDirection: "row", gap: 6 },
+    switches: { gap: 4 },
+    switchRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 44, gap: 12 },
+    switchLabel: { color: c.text, flexShrink: 1, fontSize: 15 },
+    locked: { color: c.muted },
+  });

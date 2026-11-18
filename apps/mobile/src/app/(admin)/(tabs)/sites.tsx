@@ -4,8 +4,7 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { AddToggle, ExpandableRow } from "@/components/AdminList";
 import { ListCard } from "@/components/DeliveryList";
-import { SectionHeading, reviewStyles } from "@/components/ReviewUi";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
+import { SectionHeading } from "@/components/ReviewUi";
 import {
   deactivateConfirmation,
   isRename,
@@ -14,6 +13,7 @@ import {
   siteNameError,
   type AdminSite,
 } from "@/lib/admin/siteModel";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, useUiStyles } from "@/components/Ui";
 import { createSite, listAllSites, updateSite } from "@/lib/admin/sites";
 
 type ListState =
@@ -25,6 +25,7 @@ type ListState =
 // go through admin_create_site() / admin_update_site() (migration 009), which
 // also record who changed what in site_events.
 export default function SitesScreen() {
+  const ui = useUiStyles();
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [version, setVersion] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -85,7 +86,7 @@ export default function SitesScreen() {
       {list.status === "ready" && sites.length === 0 ? <Message>No sites yet.</Message> : null}
 
       {list.status === "ready" && sites.length > 0 ? (
-        <View style={reviewStyles.section}>
+        <View style={ui.section}>
           <SectionHeading>
             {`${activeCount} active ${activeCount === 1 ? "site" : "sites"}${inactiveCount > 0 ? `, ${inactiveCount} inactive` : ""}`}
           </SectionHeading>
@@ -169,6 +170,7 @@ function SiteRow({
   onToggle: () => void;
   onChanged: () => void;
 }) {
+  const ui = useUiStyles();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(site.name);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -255,7 +257,7 @@ function SiteRow({
             }}
             value={name}
           />
-          <Text style={reviewStyles.meta}>Collectors at this site will see their group as “{normaliseSiteName(name) || "…"} group”.</Text>
+          <Text style={ui.meta}>Collectors at this site will see their group as “{normaliseSiteName(name) || "…"} group”.</Text>
         </>
       ) : null}
 

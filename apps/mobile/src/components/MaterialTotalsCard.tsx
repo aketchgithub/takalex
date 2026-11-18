@@ -1,9 +1,10 @@
 import { StyleSheet, Text, View } from "react-native";
 
-import { Message, uiColors, uiStyles } from "@/components/Ui";
+import { Message, uiStylesOf } from "@/components/Ui";
 import { barFraction, formatTotalKg, hasAnyMaterial, totalKg, type MaterialTotal } from "@/lib/recycler/model";
-import { radius, type } from "@/theme/tokens";
+import { radius, type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useThemedStyles } from "@/theme/useTheme";
 
 export type TotalsState =
   | { status: "loading" }
@@ -33,6 +34,7 @@ export function MaterialTotalsCard({
   updating?: boolean;
   emptyText?: string;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <View style={styles.card}>
@@ -95,28 +97,29 @@ export function MaterialTotalsCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: { ...uiStyles.card, gap: 12 },
-  heading: uiStyles.sectionHeading,
-  scope: { color: uiColors.muted, fontWeight: "600" },
-  note: uiStyles.meta,
-  updating: { color: uiColors.muted, fontStyle: "italic" },
-  dimmed: { opacity: 0.4 },
-  body: { gap: 14 },
-  totalBox: {
-    backgroundColor: uiColors.primarySoft,
-    borderRadius: radius.lg,
-    gap: 2,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  totalLabel: { color: uiColors.primary, fontWeight: "700" },
-  totalKg: { color: uiColors.text, fontVariant: ["tabular-nums"], fontWeight: "800" },
-  row: { gap: 6 },
-  rowText: { flexDirection: "row", gap: 12, justifyContent: "space-between" },
-  material: { color: uiColors.text, flex: 1 },
-  kg: { color: uiColors.text, fontVariant: ["tabular-nums"], fontWeight: "700" },
-  zero: { color: uiColors.muted, fontWeight: "400" },
-  track: { backgroundColor: uiColors.track, borderRadius: radius.pill, flexDirection: "row", height: 8, overflow: "hidden" },
-  bar: { backgroundColor: uiColors.primary, borderRadius: radius.pill },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    card: { ...uiStylesOf(c).card, gap: 12 },
+    heading: uiStylesOf(c).sectionHeading,
+    scope: { color: c.muted, fontWeight: "600" },
+    note: uiStylesOf(c).meta,
+    updating: { color: c.muted, fontStyle: "italic" },
+    dimmed: { opacity: 0.4 },
+    body: { gap: 14 },
+    totalBox: {
+      backgroundColor: c.primarySoft,
+      borderRadius: radius.lg,
+      gap: 2,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    totalLabel: { color: c.primary, fontWeight: "700" },
+    totalKg: { color: c.text, fontVariant: ["tabular-nums"], fontWeight: "800" },
+    row: { gap: 6 },
+    rowText: { flexDirection: "row", gap: 12, justifyContent: "space-between" },
+    material: { color: c.text, flex: 1 },
+    kg: { color: c.text, fontVariant: ["tabular-nums"], fontWeight: "700" },
+    zero: { color: c.muted, fontWeight: "400" },
+    track: { backgroundColor: c.track, borderRadius: radius.pill, flexDirection: "row", height: 8, overflow: "hidden" },
+    bar: { backgroundColor: c.primary, borderRadius: radius.pill },
+  });

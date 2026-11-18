@@ -1,5 +1,5 @@
 // The signed-out landing page. Presentation only: React Native core
-// components, colours from uiColors, no animation. Everything renders
+// components, colours from the current theme, no animation. Everything renders
 // offline except the "Collection groups" section, which is hidden until the
 // public list of groups has loaded.
 
@@ -16,8 +16,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { InlineLink, PrimaryButton, SecondaryButton, uiColors } from "@/components/Ui";
+import { InlineLink, PrimaryButton, SecondaryButton } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
+import type { Palette } from "@/theme/tokens";
+import { useThemedStyles } from "@/theme/useTheme";
 
 const HERO = require("../../assets/landing-hero.jpg");
 // landing-hero.jpg is 1340 x 1400 px.
@@ -59,6 +61,7 @@ function usePublicGroups(): PublicSiteOption[] {
 }
 
 function SectionTitle({ children }: { children: string }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <Text accessibilityRole="header" style={styles.sectionTitle}>
       {children}
@@ -75,6 +78,7 @@ export function Landing({
   onRequestAccess: () => void;
   onSignIn: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const groups = usePublicGroups();
@@ -176,128 +180,129 @@ export function Landing({
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    backgroundColor: uiColors.background,
-    flex: 1,
-  },
-  hero: {
-    backgroundColor: uiColors.primary,
-    overflow: "hidden",
-  },
-  heroImage: {
-    left: 0,
-    position: "absolute",
-    top: 0,
-    width: "100%",
-  },
-  panel: {
-    backgroundColor: uiColors.primary,
-    paddingBottom: 28,
-    paddingTop: 24,
-  },
-  panelBrand: {
-    color: uiColors.white,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 2,
-  },
-  panelBrandBy: {
-    fontWeight: "500",
-    letterSpacing: 0.5,
-  },
-  headline: {
-    color: uiColors.white,
-    fontSize: 32,
-    fontWeight: "800",
-    lineHeight: 39,
-    marginTop: 10,
-  },
-  panelText: {
-    color: uiColors.white,
-    fontSize: 18,
-    lineHeight: 26,
-    marginTop: 12,
-  },
-  actions: {
-    gap: 12,
-    paddingTop: 24,
-  },
-  section: {
-    gap: 12,
-    paddingTop: 36,
-  },
-  sectionTitle: {
-    color: uiColors.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  card: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 14,
-    padding: 16,
-  },
-  stepNumber: {
-    alignItems: "center",
-    backgroundColor: uiColors.primary,
-    borderRadius: 20,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  stepNumberText: {
-    color: uiColors.white,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  stepBody: {
-    flex: 1,
-    gap: 4,
-  },
-  stepTitle: {
-    color: uiColors.text,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  bodyText: {
-    color: uiColors.text,
-    fontSize: 17,
-    lineHeight: 25,
-  },
-  chips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  chip: {
-    backgroundColor: uiColors.white,
-    borderColor: uiColors.primary,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  chipText: {
-    color: uiColors.primary,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  footer: {
-    color: uiColors.muted,
-    fontSize: 14,
-    lineHeight: 20,
-    paddingTop: 40,
-    textAlign: "center",
-  },
-  statusBarStrip: {
-    backgroundColor: uiColors.background,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-  },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    root: {
+      backgroundColor: c.background,
+      flex: 1,
+    },
+    hero: {
+      backgroundColor: c.primary,
+      overflow: "hidden",
+    },
+    heroImage: {
+      left: 0,
+      position: "absolute",
+      top: 0,
+      width: "100%",
+    },
+    panel: {
+      backgroundColor: c.primary,
+      paddingBottom: 28,
+      paddingTop: 24,
+    },
+    panelBrand: {
+      color: c.onPrimary,
+      fontSize: 14,
+      fontWeight: "800",
+      letterSpacing: 2,
+    },
+    panelBrandBy: {
+      fontWeight: "500",
+      letterSpacing: 0.5,
+    },
+    headline: {
+      color: c.onPrimary,
+      fontSize: 32,
+      fontWeight: "800",
+      lineHeight: 39,
+      marginTop: 10,
+    },
+    panelText: {
+      color: c.onPrimary,
+      fontSize: 18,
+      lineHeight: 26,
+      marginTop: 12,
+    },
+    actions: {
+      gap: 12,
+      paddingTop: 24,
+    },
+    section: {
+      gap: 12,
+      paddingTop: 36,
+    },
+    sectionTitle: {
+      color: c.text,
+      fontSize: 24,
+      fontWeight: "800",
+    },
+    card: {
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      borderRadius: 14,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 14,
+      padding: 16,
+    },
+    stepNumber: {
+      alignItems: "center",
+      backgroundColor: c.primary,
+      borderRadius: 20,
+      height: 40,
+      justifyContent: "center",
+      width: 40,
+    },
+    stepNumberText: {
+      color: c.onPrimary,
+      fontSize: 20,
+      fontWeight: "800",
+    },
+    stepBody: {
+      flex: 1,
+      gap: 4,
+    },
+    stepTitle: {
+      color: c.text,
+      fontSize: 20,
+      fontWeight: "800",
+    },
+    bodyText: {
+      color: c.text,
+      fontSize: 17,
+      lineHeight: 25,
+    },
+    chips: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    chip: {
+      backgroundColor: c.surface,
+      borderColor: c.primary,
+      borderRadius: 22,
+      borderWidth: 1.5,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+    },
+    chipText: {
+      color: c.primary,
+      fontSize: 16,
+      fontWeight: "700",
+    },
+    footer: {
+      color: c.muted,
+      fontSize: 14,
+      lineHeight: 20,
+      paddingTop: 40,
+      textAlign: "center",
+    },
+    statusBarStrip: {
+      backgroundColor: c.background,
+      left: 0,
+      position: "absolute",
+      right: 0,
+      top: 0,
+    },
+  });

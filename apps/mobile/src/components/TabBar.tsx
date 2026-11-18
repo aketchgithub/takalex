@@ -7,9 +7,9 @@ import type { BottomTabBarProps } from "expo-router/js-tabs";
 import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, View, type ColorValue } from "react-native";
 
-import { uiColors } from "@/components/Ui";
-import { type } from "@/theme/tokens";
+import { type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
+import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 const TAB_HEIGHT = 60;
 const ICON_SIZE = 22;
@@ -27,6 +27,8 @@ export function tabIcon(name: TabIconName) {
 }
 
 export function TabBar({ state, descriptors, emitter, navigateToTab, insets }: BottomTabBarProps) {
+  const c = useColors();
+  const styles = useThemedStyles(makeStyles);
   const fs = useFontSize();
   return (
     <View accessibilityRole="tablist" style={[styles.bar, { paddingBottom: insets.bottom }]}>
@@ -35,7 +37,7 @@ export function TabBar({ state, descriptors, emitter, navigateToTab, insets }: B
         const { options } = descriptors[route.key];
         const label =
           typeof options.tabBarLabel === "string" ? options.tabBarLabel : (options.title ?? route.name);
-        const color = focused ? uiColors.primary : uiColors.muted;
+        const color = focused ? c.primary : c.muted;
 
         // Same events the default tab bar sends.
         const onPress = () => {
@@ -81,32 +83,33 @@ export function renderTabBar(props: BottomTabBarProps) {
   return <TabBar {...props} />;
 }
 
-const styles = StyleSheet.create({
-  bar: {
-    backgroundColor: uiColors.white,
-    borderTopColor: uiColors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-  },
-  tab: {
-    flex: 1,
-    height: TAB_HEIGHT,
-  },
-  indicator: {
-    backgroundColor: "transparent",
-    height: 3,
-  },
-  indicatorActive: {
-    backgroundColor: uiColors.primary,
-  },
-  content: {
-    alignItems: "center",
-    flex: 1,
-    gap: 2,
-    justifyContent: "center",
-    paddingHorizontal: 4,
-  },
-  label: {
-    fontWeight: "600",
-  },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    bar: {
+      backgroundColor: c.surface,
+      borderTopColor: c.border,
+      borderTopWidth: 1,
+      flexDirection: "row",
+    },
+    tab: {
+      flex: 1,
+      height: TAB_HEIGHT,
+    },
+    indicator: {
+      backgroundColor: "transparent",
+      height: 3,
+    },
+    indicatorActive: {
+      backgroundColor: c.primary,
+    },
+    content: {
+      alignItems: "center",
+      flex: 1,
+      gap: 2,
+      justifyContent: "center",
+      paddingHorizontal: 4,
+    },
+    label: {
+      fontWeight: "600",
+    },
+  });
