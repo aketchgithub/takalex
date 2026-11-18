@@ -2,8 +2,7 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { AccountSummary } from "@/components/AccountSummary";
-import { InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiStyles } from "@/components/Ui";
+import { Message, PrimaryButton, Screen, SecondaryButton, uiStyles } from "@/components/Ui";
 import { syncNow } from "@/lib/outbox";
 import { deliveries, syncNowOutcome, type Notice } from "@/lib/outbox/presentation";
 import { useWaitingDeliveries } from "@/lib/outbox/useWaitingDeliveries";
@@ -42,16 +41,13 @@ export default function CollectorHome() {
         </Text>
         {waiting.failed > 0 ? (
           <Message tone="error">
-            {deliveries(waiting.failed)} could not be uploaded. Open History to retry or discard.
+            {deliveries(waiting.failed)} could not be uploaded. Open the History tab to retry or discard.
           </Message>
         ) : null}
         {waiting.error ? <Message tone="error">{waiting.error}</Message> : null}
         <SecondaryButton label="Sync now" loading={syncing} onPress={() => void runSync()} />
         {notice ? <Message tone={notice.tone}>{notice.text}</Message> : null}
-        <InlineLink label="View history" onPress={() => router.push("/(collector)/history")} />
       </View>
-
-      <AccountSummary />
     </Screen>
   );
 }

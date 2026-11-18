@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
@@ -6,7 +6,7 @@ import { FilterChips } from "@/components/FilterChips";
 import { InvitationCodeCard, type IssuedInvitation } from "@/components/InvitationCodeCard";
 import { Card, Row, reviewStyles } from "@/components/ReviewUi";
 import { INVITATION_TONES, StatusRow } from "@/components/StatusBadge";
-import { InlineLink, Message, Screen, SecondaryButton } from "@/components/Ui";
+import { InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
 import { listInvitations, reissueInvitation, revokeInvitation, type InvitationRow } from "@/lib/admin/invitations";
 import {
   INVITATION_FILTERS,
@@ -75,6 +75,8 @@ export default function InvitationsScreen() {
 
   return (
     <Screen align="top" title="Invitations" subtitle="Expiry is checked against the current time. Codes are never shown again here.">
+      {/* "as any": the generated route types only learn new routes when Expo next starts. */}
+      <PrimaryButton label="Invite a team member" onPress={() => router.push("/(admin)/invite" as any)} />
       <FilterChips options={INVITATION_FILTERS} value={filter} onChange={setFilter} />
       {list.status === "loading" ? <Message>Loading invitations…</Message> : null}
       {list.status === "error" ? (

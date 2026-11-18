@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Text } from "react-native";
 
-import { AccountSummary } from "@/components/AccountSummary";
 import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
 import { DeliveryStatusRow } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen } from "@/components/Ui";
@@ -88,7 +87,6 @@ export default function PendingDeliveriesScreen() {
         : null}
 
       <InlineLink label="Refresh" onPress={reload} />
-      <AccountSummary showSites={false} />
     </Screen>
   );
 }

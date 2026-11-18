@@ -1,7 +1,7 @@
 import { Tabs } from "expo-router";
 
 import { RoleGate } from "@/components/RoleGate";
-import { renderTextTabBar } from "@/components/TextTabBar";
+import { renderTabBar, tabIcon } from "@/components/TabBar";
 import { useOutboxSync } from "@/lib/outbox/useOutboxSync";
 
 export default function CollectorLayout() {
@@ -9,10 +9,14 @@ export default function CollectorLayout() {
 
   return (
     <RoleGate role="collector">
-      <Tabs screenOptions={{ headerShown: false }} tabBar={renderTextTabBar}>
-        <Tabs.Screen name="index" options={{ title: "Home" }} />
-        <Tabs.Screen name="log" options={{ title: "New delivery" }} />
-        <Tabs.Screen name="history" options={{ title: "History" }} />
+      <Tabs screenOptions={{ headerShown: false }} tabBar={renderTabBar}>
+        <Tabs.Screen name="index" options={{ title: "Home", tabBarIcon: tabIcon("home") }} />
+        <Tabs.Screen
+          name="log"
+          options={{ title: "Record", tabBarAccessibilityLabel: "Record a delivery", tabBarIcon: tabIcon("plus-circle") }}
+        />
+        <Tabs.Screen name="history" options={{ title: "History", tabBarIcon: tabIcon("clock") }} />
+        <Tabs.Screen name="account" options={{ title: "Account", tabBarIcon: tabIcon("user") }} />
       </Tabs>
     </RoleGate>
   );

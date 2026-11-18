@@ -1,9 +1,8 @@
 import { router } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 
-import { AccountSummary } from "@/components/AccountSummary";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
-import { PrimaryButton, Screen, SecondaryButton, uiStyles } from "@/components/Ui";
+import { Screen, SecondaryButton, uiStyles } from "@/components/Ui";
 import { rangeLabel, totalsHeading } from "@/lib/recycler/model";
 import { useMaterialTotals } from "@/lib/recycler/useMaterialTotals";
 
@@ -15,27 +14,17 @@ export default function AdminOverview() {
     <Screen
       align="top"
       title="Admin overview"
-      subtitle="Manage invitations and access requests."
+      subtitle="Access requests, invitations and sites are in the tabs below."
       refreshing={totals.refreshing}
       onRefresh={totals.reload}
     >
       <View style={styles.card}>
         <Text accessibilityRole="header" style={uiStyles.sectionHeading}>
-          Quick actions
+          Materials
         </Text>
-        <PrimaryButton
-          label="Review access requests"
-          onPress={() => router.push("/(admin)/(tabs)/access-requests")}
-        />
-        <SecondaryButton
-          label="Invite a team member"
-          onPress={() => router.push("/(admin)/(tabs)/invite")}
-        />
-        <SecondaryButton
-          label="Manage invitations"
-          onPress={() => router.push("/(admin)/(tabs)/invitations")}
-        />
-        {/* "as any": the generated route types only learn new routes when Expo next starts. */}
+        <Text style={uiStyles.meta}>Add, rename, reorder or retire the materials collectors can record.</Text>
+        {/* Not a tab, so it is opened from here. "as any": the generated route
+            types only learn new routes when Expo next starts. */}
         <SecondaryButton label="Manage materials" onPress={() => router.push("/(admin)/materials" as any)} />
       </View>
       <MaterialTotalsCard
@@ -43,7 +32,6 @@ export default function AdminOverview() {
         note={`All sites. ${rangeLabel({ from: null, to: null })} Pull down to refresh.`}
         state={totals.state}
       />
-      <AccountSummary showSites={false} />
     </Screen>
   );
 }

@@ -1,14 +1,33 @@
-// Text-only bottom tab bar for the collector, manager and admin tabs. No
-// icons: the active tab has a 3px primary bar on top and primary text.
+// Bottom tab bar for every role: a Feather icon above a short label. The
+// active tab has a 3px primary bar on top and primary icon and text. Labels
+// follow the user's text size, within limits so four tabs still fit.
 
+import Feather from "@expo/vector-icons/Feather";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { ComponentProps } from "react";
+import { Pressable, StyleSheet, Text, View, type ColorValue } from "react-native";
 
 import { uiColors } from "@/components/Ui";
+import { type } from "@/theme/tokens";
+import { useFontSize } from "@/theme/useFontSize";
 
-const TAB_HEIGHT = 56;
+const TAB_HEIGHT = 60;
+const ICON_SIZE = 22;
 
-export function TextTabBar({ state, descriptors, emitter, navigateToTab, insets }: BottomTabBarProps) {
+export type TabIconName = ComponentProps<typeof Feather>["name"];
+
+// For a Tabs.Screen: options={{ title: "Home", tabBarIcon: tabIcon("home") }}
+export function tabIcon(name: TabIconName) {
+  // The tab options type the colour as ColorValue (string, number, null or
+  // a native colour); TabBar always passes a string.
+  function TabIcon({ color, size }: { color: ColorValue; size: number }) {
+    return <Feather color={typeof color === "string" ? color : undefined} name={name} size={size} />;
+  }
+  return TabIcon;
+}
+
+export function TabBar({ state, descriptors, emitter, navigateToTab, insets }: BottomTabBarProps) {
+  const fs = useFontSize();
   return (
     <View accessibilityRole="tablist" style={[styles.bar, { paddingBottom: insets.bottom }]}>
       {state.routes.map((route, index) => {
@@ -16,6 +35,7 @@ export function TextTabBar({ state, descriptors, emitter, navigateToTab, insets 
         const { options } = descriptors[route.key];
         const label =
           typeof options.tabBarLabel === "string" ? options.tabBarLabel : (options.title ?? route.name);
+        const color = focused ? uiColors.primary : uiColors.muted;
 
         // Same events the default tab bar sends.
         const onPress = () => {
@@ -38,12 +58,14 @@ export function TextTabBar({ state, descriptors, emitter, navigateToTab, insets 
             testID={options.tabBarButtonTestID}
           >
             <View style={[styles.indicator, focused ? styles.indicatorActive : null]} />
-            <View style={styles.labelBox}>
+            <View style={styles.content}>
+              {options.tabBarIcon ? options.tabBarIcon({ focused, color, size: ICON_SIZE }) : null}
               <Text
                 adjustsFontSizeToFit
+                maxFontSizeMultiplier={1.3}
                 minimumFontScale={0.85}
                 numberOfLines={1}
-                style={[styles.label, focused ? styles.labelActive : null]}
+                style={[styles.label, { color, fontSize: Math.min(fs(type.caption), 14) }]}
               >
                 {label}
               </Text>
@@ -55,8 +77,8 @@ export function TextTabBar({ state, descriptors, emitter, navigateToTab, insets 
   );
 }
 
-export function renderTextTabBar(props: BottomTabBarProps) {
-  return <TextTabBar {...props} />;
+export function renderTabBar(props: BottomTabBarProps) {
+  return <TabBar {...props} />;
 }
 
 const styles = StyleSheet.create({
@@ -77,18 +99,14 @@ const styles = StyleSheet.create({
   indicatorActive: {
     backgroundColor: uiColors.primary,
   },
-  labelBox: {
+  content: {
     alignItems: "center",
     flex: 1,
+    gap: 2,
     justifyContent: "center",
     paddingHorizontal: 4,
   },
   label: {
-    color: uiColors.muted,
-    fontSize: 13,
     fontWeight: "600",
-  },
-  labelActive: {
-    color: uiColors.primary,
   },
 });

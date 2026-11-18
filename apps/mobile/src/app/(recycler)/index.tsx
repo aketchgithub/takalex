@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { AccountSummary } from "@/components/AccountSummary";
 import { FilterChips } from "@/components/FilterChips";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
 import { InlineLink, Message, Screen, uiStyles } from "@/components/Ui";
@@ -104,9 +103,6 @@ export default function RecyclerHome() {
       <Text style={styles.hint}>
         {totals.updatedAt ? `${updatedLabel(totals.updatedAt)} · ` : ""}Pull down to refresh.
       </Text>
-
-      {/* Recyclers have no site assignments, so the sites section is left out. */}
-      <AccountSummary showSites={false} />
     </Screen>
   );
 }
