@@ -10,8 +10,9 @@ Rules for anyone (or any AI assistant) changing the code are in [`CLAUDE.md`](CL
 
 ## Status (November 2026)
 
-- Hosted Supabase project deployed: migrations `001`–`008` (frozen) and the Edge
-  Functions `invite-user` and `accept-invitation`.
+- Hosted Supabase project deployed: migrations `001`–`010` (frozen; `009` and `010`
+  on 18 Nov 2026) and the Edge Functions `invite-user` and `accept-invitation`. The
+  Sites and Materials screens need a new preview build.
 - Android preview APK built with EAS (profile `preview`).
 - "Forgot password?" by email code is built and goes live once Chemolex's email sender is
   set up on the hosted project. Reset by SMS (with email as the option) is built behind a
@@ -75,7 +76,7 @@ apps/mobile/            Expo app
   src/stores/           auth state
   eas.json              EAS build profile "preview" (Android APK)
 supabase/
-  migrations/           001–008 deployed and frozen; 009 (sites) and 010 (materials) local only; every change is a new migration
+  migrations/           001–010 deployed and frozen; every change is a new migration
   functions/            invite-user, accept-invitation, _shared
   tests/sql/            SQL suites on a throwaway PostgreSQL 17 cluster
   tests/local-stack/    checks against the local Supabase stack
