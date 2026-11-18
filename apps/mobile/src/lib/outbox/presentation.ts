@@ -23,6 +23,15 @@ export type ServerDelivery = {
 export type Tone = "info" | "success" | "error";
 export type Notice = { tone: Tone; text: string };
 
+// How long a notice stays before it disappears by itself, or null to keep it
+// until the collector moves on. Only good news goes away on its own: an error
+// or "waiting to upload" needs to stay readable.
+export const SUCCESS_NOTICE_MS = 5000;
+
+export function noticeAutoDismissMs(notice: Notice | null): number | null {
+  return notice?.tone === "success" ? SUCCESS_NOTICE_MS : null;
+}
+
 export const REVIEWED_BEFORE_PHOTO =
   "This delivery was reviewed before its photo uploaded.";
 

@@ -10,7 +10,9 @@ import {
   formatDateTime,
   formatKg,
   localRowStatus,
+  noticeAutoDismissMs,
   planPhotoCleanup,
+  SUCCESS_NOTICE_MS,
   submitOutcome,
   syncNowOutcome,
   visibleServerDeliveries,
@@ -162,6 +164,16 @@ describe("discardConfirmation", () => {
   it("warns that an unsent delivery is lost, or that only the photo goes", () => {
     assert.match(discardConfirmation(row({ syncState: "failed" })), /has not reached Takalex/);
     assert.match(discardConfirmation(row({ syncState: "failed", collectionId: "col-1" })), /is on Takalex, but its photo is not/);
+  });
+});
+
+describe("noticeAutoDismissMs", () => {
+  it("lets only success notices disappear by themselves", () => {
+    assert.equal(noticeAutoDismissMs({ tone: "success", text: "Uploaded." }), SUCCESS_NOTICE_MS);
+    assert.equal(SUCCESS_NOTICE_MS, 5000);
+    assert.equal(noticeAutoDismissMs({ tone: "info", text: "Saved on this phone, waiting to upload." }), null);
+    assert.equal(noticeAutoDismissMs({ tone: "error", text: "Upload failed." }), null);
+    assert.equal(noticeAutoDismissMs(null), null);
   });
 });
 

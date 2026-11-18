@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { EvidenceCamera, type CapturedPhoto } from "@/components/EvidenceCamera";
 import {
@@ -17,7 +17,7 @@ import {
 import { loadCollectorContext, type CollectorContext } from "@/lib/collectorContext";
 import { getOutboxRow, saveSubmission } from "@/lib/outbox";
 import { deleteTemporaryPhoto } from "@/lib/outbox/photo";
-import { formatDateTime, submitOutcome, type Notice } from "@/lib/outbox/presentation";
+import { formatDateTime, noticeAutoDismissMs, submitOutcome, type Notice } from "@/lib/outbox/presentation";
 import { normalizeReportedWeight } from "@/lib/outbox/validation";
 import { locationMessage, useDeliveryLocation } from "@/lib/useDeliveryLocation";
 import { useAuthStore } from "@/stores/authStore";
@@ -46,6 +46,15 @@ export default function NewDeliveryScreen() {
   const dismissedSubmission = useRef(0);
 
   const location = useDeliveryLocation();
+
+  // A success notice ("Uploaded…") disappears by itself; errors and
+  // "waiting to upload" stay (lib/outbox/presentation.ts).
+  useEffect(() => {
+    const ms = noticeAutoDismissMs(notice);
+    if (ms === null) return;
+    const timer = setTimeout(() => setNotice((current) => (current === notice ? null : current)), ms);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   // The result of a submit is shown at the top of the form.
   const scrollRef = useRef<ScreenScrollView | null>(null);
@@ -254,6 +263,13 @@ export default function NewDeliveryScreen() {
           <SecondaryButton label="Take photo" onPress={openCamera} />
         )}
         <Text style={styles.hint}>{locationMessage(location.state)}</Text>
+        {location.state.status === "unavailable" ? (
+          location.state.reason === "blocked" ? (
+            <InlineLink label="Open settings" onPress={() => void Linking.openSettings()} />
+          ) : (
+            <InlineLink label="Try again" onPress={location.refresh} />
+          )
+        ) : null}
       </View>
 
       <PrimaryButton

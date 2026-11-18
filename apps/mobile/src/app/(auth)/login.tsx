@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { router } from "expo-router";
+import { StyleSheet, View } from "react-native";
 import { z } from "zod";
 
 import { AuthScreen, Divider } from "@/components/AuthScreen";
@@ -62,11 +63,6 @@ export default function LoginScreen() {
       <Field
         autoComplete="current-password"
         label="Password"
-        labelAction={{
-          label: "Forgot password?",
-          onPress: () =>
-            go(() => router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } } as any)),
-        }}
         onChangeText={(value) => {
           setPassword(value);
           if (authError) setAuthError(null);
@@ -75,6 +71,15 @@ export default function LoginScreen() {
         revealable
         value={password}
       />
+      {/* Under the password field, on the right. */}
+      <View style={styles.forgot}>
+        <InlineLink
+          label="Forgot password?"
+          onPress={() =>
+            go(() => router.push({ pathname: "/(auth)/forgot-password", params: { email: email.trim() } } as any))
+          }
+        />
+      </View>
 
       {authError ? <Message tone="error">{authError}</Message> : null}
 
@@ -87,3 +92,8 @@ export default function LoginScreen() {
     </AuthScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  // Right under the password field.
+  forgot: { alignItems: "flex-end", marginTop: -6 },
+});
