@@ -5,7 +5,8 @@ import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } fr
 import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
 import { DeliveryStatusRow } from "@/components/StatusBadge";
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
-import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
+import { friendlyDateTime } from "@/lib/collectorView";
+import { formatKg } from "@/lib/outbox/presentation";
 import {
   fetchVerifiableMaterials,
   getDeliveryDetail,
@@ -50,6 +51,8 @@ function DeliveryContent({ id }: { id: string }) {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ status: "loading" });
   const [version, setVersion] = useState(0);
+  // For "Today" / "Yesterday": the time this screen was opened.
+  const [now] = useState(() => new Date());
 
   useEffect(() => {
     let active = true;
@@ -100,26 +103,24 @@ function DeliveryContent({ id }: { id: string }) {
   const delivery = detail.delivery;
   return (
     <Screen align="top" brand={false} title={collectorLabel(delivery.collectorName)} subtitle={delivery.siteName ?? "Unknown site"}>
+      <EvidencePhoto delivery={delivery} now={now} />
+
       <Card>
         <DeliveryStatusRow status={delivery.status} rejectionReason={delivery.rejectionReason} />
-        <Row label="Submitted to Takalex" value={formatDateTime(delivery.submittedAt)} />
-        {delivery.verifiedAt ? <Row label="Reviewed" value={formatDateTime(delivery.verifiedAt)} /> : null}
+        <Row label="Submitted" value={friendlyDateTime(delivery.submittedAt, now)} />
+        {delivery.verifiedAt ? <Row label="Reviewed" value={friendlyDateTime(delivery.verifiedAt, now)} /> : null}
       </Card>
 
       <View style={reviewStyles.section}>
-        <SectionHeading note="Reported by collector. Not verified.">Reported by collector</SectionHeading>
+        <SectionHeading note="Reported by the collector and their phone. Not verified.">
+          What the collector recorded
+        </SectionHeading>
         <Card>
           <Row label="Material" value={delivery.materialName ?? delivery.materialCode} />
           <Row label="Weight" value={formatKg(delivery.reportedWeightKg)} />
-        </Card>
-      </View>
-
-      <View style={reviewStyles.section}>
-        <SectionHeading note="Recorded by the collector's phone. Not verified.">Device-reported</SectionHeading>
-        <Card>
           <Row
-            label="Capture time"
-            value={delivery.capturedAt ? formatDateTime(delivery.capturedAt) : "Not recorded"}
+            label="Photo taken"
+            value={delivery.capturedAt ? friendlyDateTime(delivery.capturedAt, now) : "Not recorded"}
           />
           <Row
             label="Location"
@@ -128,8 +129,6 @@ function DeliveryContent({ id }: { id: string }) {
           />
         </Card>
       </View>
-
-      <EvidencePhoto delivery={delivery} />
 
       {delivery.status === "pending" ? (
         <ReviewForm delivery={delivery} onDone={goBack} />
@@ -140,7 +139,7 @@ function DeliveryContent({ id }: { id: string }) {
   );
 }
 
-function EvidencePhoto({ delivery }: { delivery: DeliveryDetail }) {
+function EvidencePhoto({ delivery, now }: { delivery: DeliveryDetail; now: Date }) {
   const photo = delivery.evidence[0] ?? null;
   const storagePath = photo?.storagePath ?? null;
   const [url, setUrl] = useState<string | null>(null);
@@ -177,7 +176,7 @@ function EvidencePhoto({ delivery }: { delivery: DeliveryDetail }) {
   return (
     <View style={reviewStyles.section}>
       <SectionHeading
-        note={photo?.capturedAt ? `Taken ${formatDateTime(photo.capturedAt)} (device-reported)` : undefined}
+        note={photo?.capturedAt ? `Taken ${friendlyDateTime(photo.capturedAt, now)} (device-reported)` : undefined}
       >
         Photo
       </SectionHeading>
@@ -348,7 +347,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
                           style={[styles.chip, selected ? styles.chipSelected : null, usedElsewhere ? styles.chipDisabled : null]}
                         >
                           <Text style={[styles.chipText, selected ? styles.chipTextSelected : null]}>
-                            {material.displayName}
+                            {selected ? `✓ ${material.displayName}` : material.displayName}
                           </Text>
                         </Pressable>
                       );
@@ -432,7 +431,7 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
 const styles = StyleSheet.create({
   photo: {
     aspectRatio: 3 / 4,
-    backgroundColor: "#e8ebe4",
+    backgroundColor: uiColors.track,
     borderRadius: 12,
     width: "100%",
   },

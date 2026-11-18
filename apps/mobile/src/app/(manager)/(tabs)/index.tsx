@@ -1,12 +1,12 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Text } from "react-native";
 
-import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
-import { DeliveryStatusRow } from "@/components/StatusBadge";
+import { DeliveryRow, ListCard } from "@/components/DeliveryList";
+import { SectionHeading } from "@/components/ReviewUi";
 import { InlineLink, Message, Screen } from "@/components/Ui";
-import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
+import { firstName, greeting } from "@/lib/collectorView";
 import { listPendingDeliveries, type ManagerDelivery } from "@/lib/review/api";
+import { pendingLines, sitesLine, waitingLabel } from "@/lib/review/managerView";
 import { collectorLabel } from "@/lib/review/model";
 import { useManagerSites } from "@/lib/review/useManagerSites";
 import { useAuthStore } from "@/stores/authStore";
@@ -22,9 +22,14 @@ export default function PendingDeliveriesScreen() {
   const [version, setVersion] = useState(0);
   const sites = useManagerSites(version);
   const [list, setList] = useState<ListState>({ status: "loading" });
+  // "Today" and the greeting are worked out on each reload.
+  const [now, setNow] = useState(() => new Date());
 
   // Reload whenever the tab is shown, so a reviewed delivery leaves the queue.
-  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const reload = useCallback(() => {
+    setNow(new Date());
+    setVersion((v) => v + 1);
+  }, []);
   useFocusEffect(reload);
 
   useEffect(() => {
@@ -47,15 +52,21 @@ export default function PendingDeliveriesScreen() {
     };
   }, [sites]);
 
-  const siteNames = sites.status === "ready" ? sites.sites.map((site) => site.name).join(", ") : "";
+  const name = firstName(profile?.full_name);
+  const heading =
+    list.status === "ready" && sites.status === "ready" ? waitingLabel(list.deliveries.length) : "Waiting for review";
 
   return (
     <Screen
       align="top"
-      title={`Hello${profile?.full_name ? `, ${profile.full_name}` : ""}`}
-      subtitle="Deliveries waiting for your review, newest first."
+      title={name ? `${greeting(now)}, ${name}` : greeting(now)}
+      subtitle={sites.status === "ready" ? (sitesLine(sites.sites.map((site) => site.name)) ?? undefined) : undefined}
+      refreshing={false}
+      onRefresh={reload}
     >
-      <SectionHeading note={siteNames ? `Your sites: ${siteNames}` : undefined}>Pending review</SectionHeading>
+      <SectionHeading note="Newest first. Tap a delivery to weigh and review it. Pull down to refresh.">
+        {heading}
+      </SectionHeading>
 
       {sites.status === "error" ? <Message tone="error">{sites.message}</Message> : null}
       {sites.status === "ready" && sites.sites.length === 0 ? (
@@ -68,25 +79,20 @@ export default function PendingDeliveriesScreen() {
         <Message>No deliveries are waiting for review.</Message>
       ) : null}
 
-      {list.status === "ready"
-        ? list.deliveries.map((delivery) => (
-            <Card
+      {list.status === "ready" && list.deliveries.length > 0 ? (
+        <ListCard>
+          {list.deliveries.map((delivery) => (
+            <DeliveryRow
               key={delivery.id}
-              label={`Open delivery from ${collectorLabel(delivery.collectorName)}`}
+              accessibilityHint="Opens the delivery to review it"
+              badge={{ label: "Pending review", tone: "amber" }}
+              detail={pendingLines(delivery, now)}
               onPress={() => router.push({ pathname: "/(manager)/delivery/[id]", params: { id: delivery.id } })}
-            >
-              <Text style={reviewStyles.title}>{collectorLabel(delivery.collectorName)}</Text>
-              <Text style={reviewStyles.meta}>
-                {delivery.siteName ?? "Unknown site"} · submitted {formatDateTime(delivery.submittedAt)}
-              </Text>
-              <Row label="Reported material" value={delivery.materialName ?? delivery.materialCode} />
-              <Row label="Reported weight" value={formatKg(delivery.reportedWeightKg)} />
-              <DeliveryStatusRow status={delivery.status} rejectionReason={null} />
-            </Card>
-          ))
-        : null}
-
-      <InlineLink label="Refresh" onPress={reload} />
+              title={collectorLabel(delivery.collectorName)}
+            />
+          ))}
+        </ListCard>
+      ) : null}
     </Screen>
   );
 }

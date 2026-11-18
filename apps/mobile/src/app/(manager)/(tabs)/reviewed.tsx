@@ -1,12 +1,12 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Text } from "react-native";
 
-import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
-import { DeliveryStatusRow } from "@/components/StatusBadge";
+import { DeliveryRow, ListCard } from "@/components/DeliveryList";
+import { DELIVERY_TONES } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen } from "@/components/Ui";
-import { formatDateTime, formatKg } from "@/lib/outbox/presentation";
+import { deliveryPillLabel } from "@/lib/collectorView";
 import { listReviewedDeliveries, type ReviewedDelivery } from "@/lib/review/api";
+import { reviewedLines } from "@/lib/review/managerView";
 import { collectorLabel } from "@/lib/review/model";
 import { useManagerSites } from "@/lib/review/useManagerSites";
 import { useAuthStore } from "@/stores/authStore";
@@ -22,8 +22,12 @@ export default function ReviewedDeliveriesScreen() {
   const [version, setVersion] = useState(0);
   const sites = useManagerSites(version);
   const [list, setList] = useState<ListState>({ status: "loading" });
+  const [now, setNow] = useState(() => new Date());
 
-  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const reload = useCallback(() => {
+    setNow(new Date());
+    setVersion((v) => v + 1);
+  }, []);
   useFocusEffect(reload);
 
   useEffect(() => {
@@ -47,52 +51,35 @@ export default function ReviewedDeliveriesScreen() {
   }, [sites, managerId]);
 
   return (
-    <Screen align="top" title="Reviewed" subtitle="Deliveries you have approved or rejected. Reviews are final.">
-      <SectionHeading>Reviewed by you</SectionHeading>
+    <Screen
+      align="top"
+      title="Reviewed"
+      subtitle="Deliveries you have approved or rejected, newest first. Reviews are final."
+      refreshing={false}
+      onRefresh={reload}
+    >
       {sites.status === "error" ? <Message tone="error">{sites.message}</Message> : null}
-      {list.status === "loading" && sites.status !== "error" ? <Message>Loading…</Message> : null}
+      {list.status === "loading" && sites.status !== "error" ? <Message>Loading your reviews…</Message> : null}
       {list.status === "error" ? <Message tone="error">{list.message}</Message> : null}
       {sites.status === "error" || list.status === "error" ? <InlineLink label="Try again" onPress={reload} /> : null}
       {list.status === "ready" && list.deliveries.length === 0 ? (
         <Message>You have not reviewed any deliveries yet.</Message>
       ) : null}
 
-      {list.status === "ready"
-        ? list.deliveries.map((delivery) => (
-            <Card
+      {list.status === "ready" && list.deliveries.length > 0 ? (
+        <ListCard>
+          {list.deliveries.map((delivery) => (
+            <DeliveryRow
               key={delivery.id}
-              label={`Open reviewed delivery from ${collectorLabel(delivery.collectorName)}`}
+              accessibilityHint="Opens the reviewed delivery"
+              badge={{ label: deliveryPillLabel(delivery.status), tone: DELIVERY_TONES[delivery.status] }}
+              detail={reviewedLines(delivery, now)}
               onPress={() => router.push({ pathname: "/(manager)/delivery/[id]", params: { id: delivery.id } })}
-            >
-              <Text style={reviewStyles.title}>{collectorLabel(delivery.collectorName)}</Text>
-              <Text style={reviewStyles.meta}>
-                {delivery.siteName ?? "Unknown site"} · submitted {formatDateTime(delivery.submittedAt)}
-                {delivery.verifiedAt ? ` · reviewed ${formatDateTime(delivery.verifiedAt)}` : ""}
-              </Text>
-              <DeliveryStatusRow status={delivery.status} rejectionReason={delivery.rejectionReason} />
-              <Row
-                label="Reported by collector"
-                value={`${delivery.materialName ?? delivery.materialCode} · ${formatKg(delivery.reportedWeightKg)}`}
-              />
-              {delivery.status === "approved" ? (
-                <>
-                  {delivery.items.map((item) => (
-                    <Row
-                      key={item.materialCode}
-                      label={`Verified ${item.materialName ?? item.materialCode}`}
-                      value={formatKg(item.weightKg)}
-                    />
-                  ))}
-                  {delivery.verifiedWeightKg !== null ? (
-                    <Row label="Verified total" value={formatKg(delivery.verifiedWeightKg)} />
-                  ) : null}
-                </>
-              ) : null}
-            </Card>
-          ))
-        : null}
-
-      <InlineLink label="Refresh" onPress={reload} />
+              title={collectorLabel(delivery.collectorName)}
+            />
+          ))}
+        </ListCard>
+      ) : null}
     </Screen>
   );
 }
