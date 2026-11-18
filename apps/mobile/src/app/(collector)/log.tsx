@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
@@ -21,6 +22,8 @@ import { formatDateTime, noticeAutoDismissMs, submitOutcome, type Notice } from 
 import { normalizeReportedWeight } from "@/lib/outbox/validation";
 import { locationMessage, useDeliveryLocation } from "@/lib/useDeliveryLocation";
 import { useAuthStore } from "@/stores/authStore";
+import { radius, type } from "@/theme/tokens";
+import { useFontSize } from "@/theme/useFontSize";
 
 const WEIGHT_ERROR = "Enter a weight above 0 kg with at most two decimals, for example 12.5.";
 
@@ -46,6 +49,7 @@ export default function NewDeliveryScreen() {
   const dismissedSubmission = useRef(0);
 
   const location = useDeliveryLocation();
+  const fs = useFontSize();
 
   // A success notice ("Uploaded…") disappears by itself; errors and
   // "waiting to upload" stay (lib/outbox/presentation.ts).
@@ -156,7 +160,7 @@ export default function NewDeliveryScreen() {
 
   if (!context) {
     return (
-      <Screen align="top" title="New delivery" subtitle="Collector account">
+      <Screen align="top" title="Record a delivery">
         {contextError ? (
           <>
             <Message tone="error">{contextError}</Message>
@@ -179,8 +183,8 @@ export default function NewDeliveryScreen() {
     <Screen
       align="top"
       scrollRef={scrollRef}
-      title="New delivery"
-      subtitle="Record what you delivered, then take a photo of it."
+      title="Record a delivery"
+      subtitle="Choose the material, enter the weight and take a photo."
     >
       {notice ? (
         <View style={[styles.noticeCard, notice.tone === "error" ? styles.noticeCardError : null]}>
@@ -190,10 +194,14 @@ export default function NewDeliveryScreen() {
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.label}>Site</Text>
-        {site ? (
-          <Text style={styles.value}>{site.name}</Text>
-        ) : (
+        <View style={styles.siteRow}>
+          <Feather color={uiColors.primary} name="map-pin" size={20} />
+          <View style={styles.siteText}>
+            <Text style={styles.label}>Site</Text>
+            {site ? <Text style={[styles.value, { fontSize: fs(type.cardTitle) }]}>{site.name}</Text> : null}
+          </View>
+        </View>
+        {site ? null : (
           <Message tone="error">{context.siteProblem}</Message>
         )}
         {context.source === "cache" ? (
@@ -222,8 +230,8 @@ export default function NewDeliveryScreen() {
                   }}
                   style={[styles.option, selected ? styles.optionSelected : null]}
                 >
-                  <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>
-                    {material.displayName}
+                  <Text style={[styles.optionText, selected ? styles.optionTextSelected : null, { fontSize: fs(14) }]}>
+                    {selected ? `✓ ${material.displayName}` : material.displayName}
                   </Text>
                 </Pressable>
               );
@@ -260,9 +268,25 @@ export default function NewDeliveryScreen() {
             <SecondaryButton label="Retake" onPress={openCamera} />
           </>
         ) : (
-          <SecondaryButton label="Take photo" onPress={openCamera} />
+          <Pressable
+            accessibilityLabel="Take photo"
+            accessibilityRole="button"
+            onPress={openCamera}
+            style={({ pressed }) => [styles.photoBox, pressed ? styles.photoBoxPressed : null]}
+          >
+            <Feather color={uiColors.primary} name="camera" size={28} />
+            <Text style={[styles.photoTitle, { fontSize: fs(type.body) }]}>Take photo</Text>
+            <Text style={[styles.hint, { fontSize: fs(type.meta) }]}>Show the whole delivery clearly.</Text>
+          </Pressable>
         )}
-        <Text style={styles.hint}>{locationMessage(location.state)}</Text>
+        <View style={styles.locationRow}>
+          <Feather
+            color={location.state.status === "ready" ? uiColors.success : uiColors.muted}
+            name={location.state.status === "unavailable" ? "map-pin" : location.state.status === "ready" ? "check-circle" : "loader"}
+            size={16}
+          />
+          <Text style={[styles.hint, styles.locationText, { fontSize: fs(type.meta) }]}>{locationMessage(location.state)}</Text>
+        </View>
         {location.state.status === "unavailable" ? (
           location.state.reason === "blocked" ? (
             <InlineLink label="Open settings" onPress={() => void Linking.openSettings()} />
@@ -290,7 +314,7 @@ export default function NewDeliveryScreen() {
 const styles = StyleSheet.create({
   card: uiStyles.card,
   // Saved or uploaded: green card. A failure: red border.
-  noticeCard: { ...uiStyles.card, backgroundColor: "#e3f1e7", borderColor: uiColors.primary, borderWidth: 1.5 },
+  noticeCard: { ...uiStyles.card, backgroundColor: uiColors.primarySoft, borderColor: uiColors.primary, borderWidth: 1.5 },
   noticeCardError: { backgroundColor: uiColors.white, borderColor: uiColors.danger },
   section: uiStyles.fieldGroup,
   label: uiStyles.fieldLabel,
@@ -302,4 +326,22 @@ const styles = StyleSheet.create({
   optionText: uiStyles.chipText,
   optionTextSelected: uiStyles.chipTextSelected,
   preview: { backgroundColor: uiColors.border, borderRadius: 12, width: "100%" },
+  siteRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+  siteText: { flex: 1, gap: 2 },
+  photoBox: {
+    alignItems: "center",
+    backgroundColor: uiColors.surface,
+    borderColor: uiColors.inputBorder,
+    borderRadius: radius.lg,
+    borderStyle: "dashed",
+    borderWidth: 1.5,
+    gap: 4,
+    justifyContent: "center",
+    minHeight: 128,
+    padding: 16,
+  },
+  photoBoxPressed: { backgroundColor: uiColors.primarySoft },
+  photoTitle: { color: uiColors.primary, fontWeight: "700" },
+  locationRow: { alignItems: "flex-start", flexDirection: "row", gap: 8 },
+  locationText: { flex: 1 },
 });

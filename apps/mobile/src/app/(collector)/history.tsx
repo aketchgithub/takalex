@@ -2,16 +2,16 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
-import { Card, Row, SectionHeading, reviewStyles } from "@/components/ReviewUi";
-import { DeliveryStatusRow, StatusBadge } from "@/components/StatusBadge";
+import { DeliveryRow, ListCard } from "@/components/DeliveryList";
+import { SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { DELIVERY_TONES } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen, SecondaryButton } from "@/components/Ui";
 import { cachedMaterialNames } from "@/lib/collectorContext";
+import { deliveryDetail, deliveryPillLabel, deliveryTitle, friendlyDateTime } from "@/lib/collectorView";
 import { listMyDeliveries } from "@/lib/deliveries";
 import { discardDelivery, retryDelivery, subscribeOutbox, type OutboxRow } from "@/lib/outbox";
 import {
   discardConfirmation,
-  formatDateTime,
-  formatKg,
   localRowStatus,
   visibleServerDeliveries,
   type DeliveryStatus,
@@ -33,6 +33,8 @@ export default function DeliveryHistoryScreen() {
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // "Today" / "Yesterday" are worked out when the list is (re)loaded.
+  const [now, setNow] = useState(() => new Date());
 
   const reloadServer = useCallback(() => setServerVersion((v) => v + 1), []);
 
@@ -46,7 +48,9 @@ export default function DeliveryHistoryScreen() {
     let active = true;
     listMyDeliveries(userId)
       .then((deliveries) => {
-        if (active) setServer({ status: "ready", deliveries });
+        if (!active) return;
+        setNow(new Date());
+        setServer({ status: "ready", deliveries });
       })
       .catch((error: unknown) => {
         if (active) {
@@ -115,47 +119,45 @@ export default function DeliveryHistoryScreen() {
   };
 
   return (
-    <Screen align="top" title="My deliveries" subtitle="Deliveries still on this phone are listed first.">
+    <Screen align="top" title="History" subtitle="Your deliveries, newest first.">
       {actionError ? <Message tone="error">{actionError}</Message> : null}
       {waiting.error ? <Message tone="error">{waiting.error}</Message> : null}
 
       {waiting.rows.length > 0 ? (
         <View style={reviewStyles.section}>
-          <SectionHeading>On this phone</SectionHeading>
-          {waiting.rows.map((row) => {
-            const status = localRowStatus(
-              row,
-              row.collectionId ? serverStatusById.get(row.collectionId) : undefined,
-            );
-            const busy = busyId === row.clientRecordId;
-            return (
-              <Card key={row.clientRecordId}>
-                <Text style={reviewStyles.title}>
-                  {names.get(row.materialCode) ?? row.materialCode} · {formatKg(row.reportedWeightKg)}
-                </Text>
-                <Text style={reviewStyles.meta}>Saved {formatDateTime(row.createdAt)}</Text>
-                {row.syncState === "failed" ? (
-                  <Message tone={status.tone}>{status.text}</Message>
-                ) : (
-                  <StatusBadge label={status.text} tone="grey" />
-                )}
-                {row.syncState === "pending" && row.lastError ? (
-                  <Text style={reviewStyles.meta}>{row.lastError}</Text>
-                ) : null}
-                {row.syncState === "failed" ? (
-                  <View style={styles.actions}>
-                    <SecondaryButton label="Retry" loading={busy} onPress={() => void retry(row)} />
-                    <SecondaryButton
-                      label="Discard"
-                      tone="danger"
-                      disabled={busy}
-                      onPress={() => confirmDiscard(row)}
-                    />
-                  </View>
-                ) : null}
-              </Card>
-            );
-          })}
+          <SectionHeading note="Saved here and not on Takalex yet.">On this phone</SectionHeading>
+          <ListCard>
+            {waiting.rows.map((row) => {
+              const status = localRowStatus(
+                row,
+                row.collectionId ? serverStatusById.get(row.collectionId) : undefined,
+              );
+              const busy = busyId === row.clientRecordId;
+              const failed = row.syncState === "failed";
+              return (
+                <DeliveryRow
+                  key={row.clientRecordId}
+                  title={deliveryTitle(names.get(row.materialCode) ?? row.materialCode, row.reportedWeightKg)}
+                  detail={`Saved ${friendlyDateTime(row.createdAt, now)}`}
+                  badge={failed ? { label: "Upload failed", tone: "red" } : { label: "Waiting to upload", tone: "grey" }}
+                >
+                  {failed ? <Message tone={status.tone}>{status.text}</Message> : null}
+                  {!failed && row.lastError ? <Text style={reviewStyles.meta}>{row.lastError}</Text> : null}
+                  {failed ? (
+                    <View style={styles.actions}>
+                      <SecondaryButton label="Retry" loading={busy} onPress={() => void retry(row)} />
+                      <SecondaryButton
+                        label="Discard"
+                        tone="danger"
+                        disabled={busy}
+                        onPress={() => confirmDiscard(row)}
+                      />
+                    </View>
+                  ) : null}
+                </DeliveryRow>
+              );
+            })}
+          </ListCard>
         </View>
       ) : null}
 
@@ -171,22 +173,23 @@ export default function DeliveryHistoryScreen() {
         {server.status === "ready" && serverRows.length === 0 ? (
           <Message>No deliveries yet.</Message>
         ) : null}
-        {serverRows.map((delivery) => (
-          <Card key={delivery.id}>
-            <Text style={reviewStyles.title}>{delivery.materialName ?? delivery.materialCode}</Text>
-            <Text style={reviewStyles.meta}>Submitted {formatDateTime(delivery.submittedAt)}</Text>
-            <Row label="Reported weight" value={formatKg(delivery.reportedWeightKg)} />
-            <DeliveryStatusRow status={delivery.status} rejectionReason={delivery.rejectionReason} />
-            {delivery.status === "approved" && delivery.verifiedWeightKg !== null ? (
-              <Row label="Verified total" value={formatKg(delivery.verifiedWeightKg)} />
-            ) : null}
-          </Card>
-        ))}
+        {serverRows.length > 0 ? (
+          <ListCard>
+            {serverRows.map((delivery) => (
+              <DeliveryRow
+                key={delivery.id}
+                title={deliveryTitle(delivery.materialName ?? delivery.materialCode, delivery.reportedWeightKg)}
+                detail={deliveryDetail(delivery, now)}
+                badge={{ label: deliveryPillLabel(delivery.status), tone: DELIVERY_TONES[delivery.status] }}
+              />
+            ))}
+          </ListCard>
+        ) : null}
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  actions: { flexDirection: "row", gap: 12, marginTop: 8 },
+  actions: { flexDirection: "row", gap: 12 },
 });

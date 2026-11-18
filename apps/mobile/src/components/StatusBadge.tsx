@@ -19,7 +19,7 @@ const TONES: Record<StatusTone, { backgroundColor: string; borderColor: string; 
   grey: { backgroundColor: colors.divider, borderColor: colors.divider, color: "#3F4A3F" },
 };
 
-const DELIVERY_TONES: Record<DeliveryStatus, StatusTone> = {
+export const DELIVERY_TONES: Record<DeliveryStatus, StatusTone> = {
   pending: "amber",
   approved: "green",
   rejected: "red",
