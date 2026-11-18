@@ -5,6 +5,7 @@ import { FilterChips } from "@/components/FilterChips";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
 import { InlineLink, Message, Screen, uiStyles } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
+import { firstName, greeting } from "@/lib/collectorView";
 import {
   DATE_PRESETS,
   presetRange,
@@ -65,7 +66,7 @@ export default function RecyclerHome() {
   return (
     <Screen
       align="top"
-      title={`Hello${profile?.full_name ? `, ${profile.full_name}` : ""}`}
+      title={firstName(profile?.full_name) ? `${greeting(now)}, ${firstName(profile?.full_name)}` : greeting(now)}
       subtitle="Sorted material approved and weighed at Chemolex sites."
       refreshing={totals.refreshing}
       onRefresh={refresh}
@@ -108,7 +109,7 @@ export default function RecyclerHome() {
 }
 
 const styles = StyleSheet.create({
-  filters: uiStyles.fieldGroup,
+  filters: { ...uiStyles.card, gap: 8 },
   label: uiStyles.fieldLabel,
   hint: uiStyles.meta,
 });

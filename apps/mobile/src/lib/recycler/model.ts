@@ -113,3 +113,13 @@ export function formatTotalKg(kg: number): string {
 export function hasAnyMaterial(rows: MaterialTotal[]): boolean {
   return rows.some((row) => toCents(row.verifiedWeightKg) > 0);
 }
+
+// Share of the largest material, for the bar behind each row (0 to 1). Any
+// weight above zero shows at least a sliver, so it never looks like nothing.
+export const MIN_BAR = 0.02;
+
+export function barFraction(kg: number, rows: MaterialTotal[]): number {
+  const max = Math.max(0, ...rows.map((row) => row.verifiedWeightKg));
+  if (!(kg > 0) || !(max > 0)) return 0;
+  return Math.max(MIN_BAR, Math.min(1, kg / max));
+}

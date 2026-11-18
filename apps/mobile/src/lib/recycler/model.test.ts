@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  barFraction,
   formatTotalKg,
   hasAnyMaterial,
   nairobiDate,
@@ -89,5 +90,21 @@ describe("totals and formatting", () => {
   it("knows when there is nothing yet", () => {
     assert.equal(hasAnyMaterial(rows([0, 0])), false);
     assert.equal(hasAnyMaterial(rows([0, 0.01])), true);
+  });
+});
+
+describe("barFraction", () => {
+  const rows = (weights: number[]): MaterialTotal[] =>
+    weights.map((w, i) => ({ code: `M${i}`, displayName: `M${i}`, sortOrder: i, verifiedWeightKg: w }));
+
+  it("is the share of the largest material", () => {
+    const list = rows([10, 5, 0]);
+    assert.equal(barFraction(10, list), 1);
+    assert.equal(barFraction(5, list), 0.5);
+    assert.equal(barFraction(0, list), 0);
+  });
+  it("shows a sliver for a tiny weight and nothing when all are zero", () => {
+    assert.equal(barFraction(0.01, rows([1000, 0.01])), 0.02);
+    assert.equal(barFraction(0, rows([0, 0])), 0);
   });
 });
