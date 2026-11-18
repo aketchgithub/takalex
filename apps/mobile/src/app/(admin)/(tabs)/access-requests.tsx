@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
-import { Card, Row, reviewStyles } from "@/components/ReviewUi";
-import { REQUEST_TONES, StatusRow } from "@/components/StatusBadge";
+import { CardHeader } from "@/components/AdminList";
+import { Card, Row } from "@/components/ReviewUi";
+import { REQUEST_TONES } from "@/components/StatusBadge";
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
 import {
   REQUEST_FILTERS,
@@ -18,7 +19,7 @@ import {
   type RequestFilter,
 } from "@/lib/admin/model";
 import { listAccessRequests, rejectAccessRequest } from "@/lib/admin/requests";
-import { formatDateTime } from "@/lib/outbox/presentation";
+import { friendlyDateTime } from "@/lib/collectorView";
 import { roleLabels } from "@/types/auth";
 
 type ListState =
@@ -53,7 +54,13 @@ export default function AccessRequestsScreen() {
   const rows = list.status === "ready" ? filterRequests(list.rows, filter) : [];
 
   return (
-    <Screen align="top" title="Access requests" subtitle="Newest first. Approve a request to invite the person, or reject it with a note.">
+    <Screen
+      align="top"
+      title="Access requests"
+      subtitle="Newest first. Approve a request to invite the person, or reject it with a note."
+      refreshing={false}
+      onRefresh={reload}
+    >
       <FilterChips options={REQUEST_FILTERS} value={filter} onChange={setFilter} />
 
       {list.status === "loading" ? <Message>Loading access requests…</Message> : null}
@@ -73,8 +80,6 @@ export default function AccessRequestsScreen() {
           onChanged={reload}
         />
       ))}
-
-      <InlineLink label="Refresh" onPress={reload} />
     </Screen>
   );
 }
@@ -100,6 +105,8 @@ function RequestCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = isOpenRequest(request.status);
+  // For "Today" / "Yesterday".
+  const [now] = useState(() => new Date());
 
   const reject = () => {
     const checked = checkRejectionNote(note);
@@ -125,12 +132,14 @@ function RequestCard({
 
   return (
     <Card>
-      <Text style={reviewStyles.title}>{request.fullName}</Text>
-      <Text style={reviewStyles.meta}>Submitted {formatDateTime(request.createdAt)}</Text>
+      <CardHeader
+        title={request.fullName}
+        detail={[`Submitted ${friendlyDateTime(request.createdAt, now)}`]}
+        badge={{ label: requestStatusLabel(request.status), tone: REQUEST_TONES[request.status] }}
+      />
       <Row label="Contact" stacked value={contactLines(request.email, request.phone)} />
       <Row label="Requested role" value={roleLabels[request.role]} />
       <Row label={request.role === "collector" ? "Group (site)" : "Site"} value={groupLabel(request.role, request.siteName, request.siteId)} />
-      <StatusRow label={requestStatusLabel(request.status)} tone={REQUEST_TONES[request.status]} />
       {request.notes ? <Row label="Note" stacked value={request.notes} /> : null}
       {open && !request.email ? (
         <Text style={styles.warning}>No email on this request: you will confirm one with the requester by phone.</Text>

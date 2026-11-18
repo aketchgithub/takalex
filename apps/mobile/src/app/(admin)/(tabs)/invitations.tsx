@@ -1,11 +1,12 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
 import { InvitationCodeCard, type IssuedInvitation } from "@/components/InvitationCodeCard";
-import { Card, Row, reviewStyles } from "@/components/ReviewUi";
-import { INVITATION_TONES, StatusRow } from "@/components/StatusBadge";
+import { CardHeader } from "@/components/AdminList";
+import { Card, Row } from "@/components/ReviewUi";
+import { INVITATION_TONES } from "@/components/StatusBadge";
 import { InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
 import { listInvitations, reissueInvitation, revokeInvitation, type InvitationRow } from "@/lib/admin/invitations";
 import {
@@ -74,7 +75,13 @@ export default function InvitationsScreen() {
       : [];
 
   return (
-    <Screen align="top" title="Invitations" subtitle="Expiry is checked against the current time. Codes are never shown again here.">
+    <Screen
+      align="top"
+      title="Invitations"
+      subtitle="Codes are shown once, when created or reissued, and never again here."
+      refreshing={false}
+      onRefresh={reload}
+    >
       {/* "as any": the generated route types only learn new routes when Expo next starts. */}
       <PrimaryButton label="Invite a team member" onPress={() => router.push("/(admin)/invite" as any)} />
       <FilterChips options={INVITATION_FILTERS} value={filter} onChange={setFilter} />
@@ -90,8 +97,6 @@ export default function InvitationsScreen() {
       {rows.map(({ row, display }) => (
         <InvitationCard key={row.id} row={row} display={display} onChanged={reload} onIssued={setIssued} />
       ))}
-
-      <InlineLink label="Refresh" onPress={reload} />
     </Screen>
   );
 }
@@ -155,10 +160,12 @@ function InvitationCard({
 
   return (
     <Card>
-      <Text style={reviewStyles.title}>{name}</Text>
-      {row.fullName ? <Text style={reviewStyles.meta}>{row.email}</Text> : null}
+      <CardHeader
+        title={name}
+        detail={row.fullName ? [row.email] : undefined}
+        badge={{ label: INVITATION_STATUS_LABELS[display], tone: INVITATION_TONES[display] }}
+      />
       <Row label="Role" value={roleLabels[row.role]} />
-      <StatusRow label={INVITATION_STATUS_LABELS[display]} tone={INVITATION_TONES[display]} />
       <Row label="Created" value={formatDateTime(row.createdAt)} />
       {display === "pending" || display === "expired" ? (
         <Row label={display === "expired" ? "Expired" : "Expires"} value={formatDateTime(row.expiresAt)} />

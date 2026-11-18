@@ -2,8 +2,10 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 
-import { Card, reviewStyles } from "@/components/ReviewUi";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { AddToggle, ExpandableRow } from "@/components/AdminList";
+import { ListCard } from "@/components/DeliveryList";
+import { SectionHeading, reviewStyles } from "@/components/ReviewUi";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
 import {
   deactivateConfirmation,
   isRename,
@@ -26,6 +28,9 @@ export default function SitesScreen() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [version, setVersion] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  // One site open at a time.
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   useFocusEffect(reload);
@@ -57,8 +62,18 @@ export default function SitesScreen() {
   const inactiveCount = sites.length - activeCount;
 
   return (
-    <Screen align="top" title="Site management" subtitle="Collection sites and their groups." refreshing={refreshing} onRefresh={refresh}>
-      {list.status === "ready" ? <AddSiteForm sites={sites} onAdded={reload} /> : null}
+    <Screen
+      align="top"
+      title="Sites"
+      subtitle="Each site's collectors form a group with the site's name. Tap a site to rename or deactivate it."
+      refreshing={refreshing}
+      onRefresh={refresh}
+    >
+      {list.status === "ready" ? (
+        <AddToggle label="Add a site" open={adding} onToggle={() => setAdding((v) => !v)}>
+          <AddSiteForm sites={sites} onAdded={reload} />
+        </AddToggle>
+      ) : null}
 
       {list.status === "loading" ? <Message>Loading sites…</Message> : null}
       {list.status === "error" ? (
@@ -70,14 +85,24 @@ export default function SitesScreen() {
       {list.status === "ready" && sites.length === 0 ? <Message>No sites yet.</Message> : null}
 
       {list.status === "ready" && sites.length > 0 ? (
-        <Text style={styles.count}>
-          {activeCount} active {activeCount === 1 ? "site" : "sites"}
-          {inactiveCount > 0 ? `, ${inactiveCount} inactive` : ""}
-        </Text>
+        <View style={reviewStyles.section}>
+          <SectionHeading>
+            {`${activeCount} active ${activeCount === 1 ? "site" : "sites"}${inactiveCount > 0 ? `, ${inactiveCount} inactive` : ""}`}
+          </SectionHeading>
+          <ListCard>
+            {sites.map((site) => (
+              <SiteRow
+                key={site.id}
+                site={site}
+                sites={sites}
+                expanded={openId === site.id}
+                onToggle={() => setOpenId((current) => (current === site.id ? null : site.id))}
+                onChanged={reload}
+              />
+            ))}
+          </ListCard>
+        </View>
       ) : null}
-      {sites.map((site) => (
-        <SiteCard key={site.id} site={site} sites={sites} onChanged={reload} />
-      ))}
     </Screen>
   );
 }
@@ -110,8 +135,7 @@ function AddSiteForm({ sites, onAdded }: { sites: AdminSite[]; onAdded: () => vo
   };
 
   return (
-    <View style={styles.card}>
-      <Text style={reviewStyles.title}>Add a site</Text>
+    <>
       <Field
         autoCapitalize="words"
         autoCorrect={false}
@@ -128,11 +152,23 @@ function AddSiteForm({ sites, onAdded }: { sites: AdminSite[]; onAdded: () => vo
       {error ? <Message tone="error">{error}</Message> : null}
       {added ? <Message tone="success">{added}</Message> : null}
       <PrimaryButton label="Add site" loading={saving} loadingLabel="Adding…" onPress={() => void submit()} />
-    </View>
+    </>
   );
 }
 
-function SiteCard({ site, sites, onChanged }: { site: AdminSite; sites: AdminSite[]; onChanged: () => void }) {
+function SiteRow({
+  site,
+  sites,
+  expanded,
+  onToggle,
+  onChanged,
+}: {
+  site: AdminSite;
+  sites: AdminSite[];
+  expanded: boolean;
+  onToggle: () => void;
+  onChanged: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(site.name);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -192,7 +228,19 @@ function SiteCard({ site, sites, onChanged }: { site: AdminSite; sites: AdminSit
   };
 
   return (
-    <Card>
+    <ExpandableRow
+      icon="map-pin"
+      title={site.name}
+      detail={`${site.name} group`}
+      badge={site.active ? undefined : { label: "Inactive", tone: "grey" }}
+      dimmed={!site.active}
+      expanded={expanded}
+      onToggle={() => {
+        setEditing(false);
+        setError(null);
+        onToggle();
+      }}
+    >
       {editing ? (
         <>
           <Field
@@ -209,12 +257,7 @@ function SiteCard({ site, sites, onChanged }: { site: AdminSite; sites: AdminSit
           />
           <Text style={reviewStyles.meta}>Collectors at this site will see their group as “{normaliseSiteName(name) || "…"} group”.</Text>
         </>
-      ) : (
-        <View style={styles.titleRow}>
-          <Text style={[reviewStyles.title, styles.name, site.active ? null : styles.inactiveName]}>{site.name}</Text>
-          {site.active ? null : <Text style={styles.badge}>Inactive</Text>}
-        </View>
-      )}
+      ) : null}
 
       {error ? <Message tone="error">{error}</Message> : null}
 
@@ -237,26 +280,10 @@ function SiteCard({ site, sites, onChanged }: { site: AdminSite; sites: AdminSit
           </>
         )}
       </View>
-    </Card>
+    </ExpandableRow>
   );
 }
 
 const styles = StyleSheet.create({
-  card: uiStyles.card,
-  count: uiStyles.fieldLabel,
-  titleRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  name: { flexShrink: 1 },
-  inactiveName: { color: uiColors.muted },
-  badge: {
-    borderColor: uiColors.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    color: uiColors.muted,
-    fontSize: 13,
-    fontWeight: "600",
-    overflow: "hidden",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
 });

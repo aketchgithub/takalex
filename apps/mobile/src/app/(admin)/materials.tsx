@@ -2,8 +2,10 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, Switch, Text, View } from "react-native";
 
-import { Card, reviewStyles } from "@/components/ReviewUi";
-import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors, uiStyles } from "@/components/Ui";
+import { AddToggle, ExpandableRow, IconButton } from "@/components/AdminList";
+import { ListCard } from "@/components/DeliveryList";
+import { reviewStyles } from "@/components/ReviewUi";
+import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiColors } from "@/components/Ui";
 import {
   deactivateMaterialConfirmation,
   deleteMaterialConfirmation,
@@ -34,6 +36,9 @@ export default function MaterialsScreen() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [version, setVersion] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  // One material open at a time.
+  const [openCode, setOpenCode] = useState<string | null>(null);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   useFocusEffect(reload);
@@ -61,14 +66,18 @@ export default function MaterialsScreen() {
     <Screen
       align="top"
       brand={false}
-      subtitle="The materials collectors report, managers sort into and recyclers see. A material used in deliveries cannot be deleted: deactivate it instead."
+      subtitle="In the order every screen shows them. Use the arrows to reorder; tap a material to edit, deactivate or delete it. A material used in deliveries can only be deactivated."
       refreshing={refreshing}
       onRefresh={() => {
         setRefreshing(true);
         reload();
       }}
     >
-      {list.status === "ready" ? <AddMaterialForm materials={materials} onAdded={reload} /> : null}
+      {list.status === "ready" ? (
+        <AddToggle label="Add a material" open={adding} onToggle={() => setAdding((v) => !v)}>
+          <AddMaterialForm materials={materials} onAdded={reload} />
+        </AddToggle>
+      ) : null}
 
       {list.status === "loading" ? <Message>Loading materials…</Message> : null}
       {list.status === "error" ? (
@@ -78,16 +87,22 @@ export default function MaterialsScreen() {
         </>
       ) : null}
 
-      {materials.map((material, index) => (
-        <MaterialCard
-          key={material.code}
-          material={material}
-          materials={materials}
-          isFirst={index === 0}
-          isLast={index === materials.length - 1}
-          onChanged={reload}
-        />
-      ))}
+      {materials.length > 0 ? (
+        <ListCard>
+          {materials.map((material, index) => (
+            <MaterialRow
+              key={material.code}
+              material={material}
+              materials={materials}
+              isFirst={index === 0}
+              isLast={index === materials.length - 1}
+              expanded={openCode === material.code}
+              onToggle={() => setOpenCode((current) => (current === material.code ? null : material.code))}
+              onChanged={reload}
+            />
+          ))}
+        </ListCard>
+      ) : null}
     </Screen>
   );
 }
@@ -162,8 +177,7 @@ function AddMaterialForm({ materials, onAdded }: { materials: AdminMaterial[]; o
   };
 
   return (
-    <View style={styles.card}>
-      <Text style={reviewStyles.title}>Add a material</Text>
+    <>
       <Field
         autoCapitalize="words"
         autoCorrect={false}
@@ -181,21 +195,25 @@ function AddMaterialForm({ materials, onAdded }: { materials: AdminMaterial[]; o
       {error ? <Message tone="error">{error}</Message> : null}
       {added ? <Message tone="success">{added}</Message> : null}
       <PrimaryButton label="Add material" loading={saving} loadingLabel="Adding…" onPress={() => void submit()} />
-    </View>
+    </>
   );
 }
 
-function MaterialCard({
+function MaterialRow({
   material,
   materials,
   isFirst,
   isLast,
+  expanded,
+  onToggle,
   onChanged,
 }: {
   material: AdminMaterial;
   materials: AdminMaterial[];
   isFirst: boolean;
   isLast: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onChanged: () => void;
 }) {
   const current: MaterialRoles = {
@@ -275,7 +293,34 @@ function MaterialCard({
   const locked = busy !== null;
 
   return (
-    <Card>
+    <ExpandableRow
+      title={material.displayName}
+      detail={`${rolesSummary(current)} · code ${material.code}`}
+      badge={material.isActive ? undefined : { label: "Inactive", tone: "grey" }}
+      dimmed={!material.isActive}
+      expanded={expanded}
+      onToggle={() => {
+        setEditing(false);
+        setError(null);
+        onToggle();
+      }}
+      trailing={
+        <View style={styles.move}>
+          <IconButton
+            icon="arrow-up"
+            label={`Move ${material.displayName} up`}
+            disabled={locked || isFirst}
+            onPress={() => void run("up", () => moveMaterial(material.code, "up"))}
+          />
+          <IconButton
+            icon="arrow-down"
+            label={`Move ${material.displayName} down`}
+            disabled={locked || isLast}
+            onPress={() => void run("down", () => moveMaterial(material.code, "down"))}
+          />
+        </View>
+      }
+    >
       {editing ? (
         <>
           <Field
@@ -292,19 +337,7 @@ function MaterialCard({
           />
           <RoleSwitches roles={roles} code={material.code} onChange={setRoles} />
         </>
-      ) : (
-        <>
-          <View style={styles.titleRow}>
-            <Text style={[reviewStyles.title, styles.name, material.isActive ? null : styles.inactiveName]}>
-              {material.displayName}
-            </Text>
-            {material.isActive ? null : <Text style={styles.badge}>Inactive</Text>}
-          </View>
-          <Text style={reviewStyles.meta}>
-            {rolesSummary(current)} · code {material.code}
-          </Text>
-        </>
-      )}
+      ) : null}
 
       {error ? <Message tone="error">{error}</Message> : null}
 
@@ -318,18 +351,6 @@ function MaterialCard({
           <>
             <SecondaryButton label="Edit" disabled={locked} onPress={startEditing} />
             <SecondaryButton
-              label="Move up"
-              disabled={locked || isFirst}
-              loading={busy === "up"}
-              onPress={() => void run("up", () => moveMaterial(material.code, "up"))}
-            />
-            <SecondaryButton
-              label="Move down"
-              disabled={locked || isLast}
-              loading={busy === "down"}
-              onPress={() => void run("down", () => moveMaterial(material.code, "down"))}
-            />
-            <SecondaryButton
               label={material.isActive ? "Deactivate" : "Reactivate"}
               loading={busy === "status"}
               disabled={locked}
@@ -342,27 +363,13 @@ function MaterialCard({
           </>
         )}
       </View>
-    </Card>
+    </ExpandableRow>
   );
 }
 
 const styles = StyleSheet.create({
-  card: uiStyles.card,
-  titleRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  name: { flexShrink: 1 },
-  inactiveName: { color: uiColors.muted },
-  badge: {
-    borderColor: uiColors.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    color: uiColors.muted,
-    fontSize: 13,
-    fontWeight: "600",
-    overflow: "hidden",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  move: { flexDirection: "row", gap: 6 },
   switches: { gap: 4 },
   switchRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 44, gap: 12 },
   switchLabel: { color: uiColors.text, flexShrink: 1, fontSize: 15 },
