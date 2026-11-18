@@ -1,9 +1,11 @@
 import { router } from "expo-router";
+import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { AdminAnalytics } from "@/components/AdminAnalytics";
 import { MaterialTotalsCard } from "@/components/MaterialTotalsCard";
 import { Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
-import { rangeLabel, totalsHeading } from "@/lib/recycler/model";
+import { nairobiDate, rangeLabel, totalsHeading } from "@/lib/recycler/model";
 import { useMaterialTotals } from "@/lib/recycler/useMaterialTotals";
 import type { Palette } from "@/theme/tokens";
 import { useThemedStyles } from "@/theme/useTheme";
@@ -13,6 +15,9 @@ export default function AdminOverview() {
   const styles = useThemedStyles(makeStyles);
   // All sites, all time: the same numbers recyclers see by default.
   const totals = useMaterialTotals(null, null, null);
+  // Analytics: today's Nairobi date and a counter, both renewed on pull to refresh.
+  const [today, setToday] = useState(() => nairobiDate(new Date()));
+  const [analyticsVersion, setAnalyticsVersion] = useState(0);
 
   return (
     <Screen
@@ -20,7 +25,11 @@ export default function AdminOverview() {
       title="Admin overview"
       subtitle="Access requests, invitations and sites are in the tabs below."
       refreshing={totals.refreshing}
-      onRefresh={totals.reload}
+      onRefresh={() => {
+        totals.reload();
+        setToday(nairobiDate(new Date()));
+        setAnalyticsVersion((v) => v + 1);
+      }}
     >
       <View style={styles.card}>
         <Text accessibilityRole="header" style={ui.sectionHeading}>
@@ -36,6 +45,7 @@ export default function AdminOverview() {
         note={`All sites. ${rangeLabel({ from: null, to: null })} Pull down to refresh.`}
         state={totals.state}
       />
+      <AdminAnalytics today={today} version={analyticsVersion} />
     </Screen>
   );
 }

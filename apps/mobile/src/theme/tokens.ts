@@ -68,6 +68,14 @@ export const darkColors: Palette = {
 
 export type ColorScheme = "light" | "dark";
 
+// Colours for chart series (one per material), in order; repeated when there
+// are more materials. Each is distinct from its neighbours and readable on
+// the theme's surface.
+export const chartSeries: Record<ColorScheme, readonly string[]> = {
+  light: ["#1F6B45", "#2F6FB2", "#C27C0E", "#8E4FB0", "#C2410C", "#4B7F8C"],
+  dark: ["#5BC48F", "#6FA8E8", "#F0B866", "#C08BE0", "#F08A5D", "#7FB8C4"],
+};
+
 export function paletteFor(scheme: ColorScheme): Palette {
   return scheme === "dark" ? darkColors : lightColors;
 }
