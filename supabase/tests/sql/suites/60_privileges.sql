@@ -118,6 +118,7 @@ INSERT INTO t.expected_functions VALUES
   ('public.admin_update_material(text,text,boolean,boolean,boolean,boolean)', 'rpc', true, false, true, false),
   ('public.admin_move_material(text,text)',                    'rpc',        true,  false, true,  false),
   ('public.admin_delete_material(text)',                       'rpc',        true,  false, true,  false),
+  ('public.admin_set_site_location(uuid,double precision,double precision)', 'rpc', true, false, true, false),
   ('public.admin_site_volume(date,date)',                      'rpc',        true,  false, true,  false),
   ('public.admin_material_breakdown(date,date)',               'rpc',        true,  false, true,  false),
   ('public.admin_monthly_trend(date,integer)',                 'rpc',        true,  false, true,  false),

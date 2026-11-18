@@ -76,7 +76,7 @@ apps/mobile/            Expo app
   src/stores/           auth state
   eas.json              EAS build profile "preview" (Android APK)
 supabase/
-  migrations/           001–010 deployed and frozen; 011 (admin analytics) local only; every change is a new migration
+  migrations/           001–010 deployed and frozen; 011 (admin analytics) and 012 (site locations) local only; every change is a new migration
   functions/            invite-user, accept-invitation, _shared
   tests/sql/            SQL suites on a throwaway PostgreSQL 17 cluster
   tests/local-stack/    checks against the local Supabase stack

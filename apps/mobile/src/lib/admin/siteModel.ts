@@ -6,7 +6,15 @@
 import { isNetworkError } from "../outbox/errors.ts";
 import type { RemoteError } from "../outbox/types.ts";
 
-export type AdminSite = { id: string; name: string; active: boolean };
+// latitude / longitude: set by an admin (migration 012), or null / absent
+// when the site has no location yet.
+export type AdminSite = {
+  id: string;
+  name: string;
+  active: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+};
 
 export const SITE_NAME_MAX = 80;
 
