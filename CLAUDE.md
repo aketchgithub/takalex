@@ -54,7 +54,7 @@ Enforce these in the database, not only in the UI:
 - Codes are shared by WhatsApp or SMS. The app sends no email; real email needs custom SMTP.
 
 ## Migrations
-- Migrations 001–010 are deployed to the hosted project and frozen. Never edit an
+- Migrations 001–012 are deployed to the hosted project and frozen. Never edit an
   applied migration.
 - Every schema change is a new numbered migration, tested locally (`supabase db reset`)
   and through the SQL suites before the maintainer deploys it.
