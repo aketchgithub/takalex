@@ -1,5 +1,6 @@
-// The user's Appearance choice (Account > Display > Appearance). Pure
-// TypeScript, tested by appearance.test.ts.
+// The user's Appearance choice (Account > Display > Appearance). The app
+// starts in Light (stores/preferencesStore.ts); Dark and System are opt-in.
+// Pure TypeScript, tested by appearance.test.ts.
 
 import type { ColorScheme } from "./tokens.ts";
 

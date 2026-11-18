@@ -29,7 +29,7 @@ export const usePreferencesStore = create<PreferencesState>()(
   persist(
     (set) => ({
       textSize: "normal",
-      appearance: "system",
+      appearance: "light",
       setTextSize: (size) => set({ textSize: size }),
       setAppearance: (appearance) => set({ appearance }),
     }),
@@ -37,9 +37,9 @@ export const usePreferencesStore = create<PreferencesState>()(
       name: "takalex-preferences",
       storage: createJSONStorage(() => authStorage),
       partialize: (state): Saved => ({ textSize: state.textSize, appearance: state.appearance }),
-      // Version 1 kept only the text size; Appearance then starts at System.
+      // Version 1 kept only the text size; Appearance then starts at Light.
       version: 2,
-      migrate: (persisted) => readSaved(persisted, { textSize: "normal", appearance: "system" }) as PreferencesState,
+      migrate: (persisted) => readSaved(persisted, { textSize: "normal", appearance: "light" }) as PreferencesState,
       merge: (persisted, current) => ({ ...current, ...readSaved(persisted, current) }),
     },
   ),
