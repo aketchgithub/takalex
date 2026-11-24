@@ -11,6 +11,7 @@
 // own text is never shown. The request step answers the same way whether or
 // not the number or email has an account.
 
+import { TIMEOUT_MESSAGE } from "./fetchWithTimeout.ts";
 import { isNetworkError } from "./outbox/errors.ts";
 import type { RemoteError } from "./outbox/types.ts";
 
@@ -56,8 +57,15 @@ export const RESET_SMS_ALREADY_SENT_MESSAGE =
   "If an account uses this number, a code has been sent. Use the code from the most recent SMS, or wait a minute before asking for a new one.";
 
 export type ResetRequestOutcome =
-  | { kind: "sent" | "already_sent"; message: string }
+  | { kind: "sent" | "already_sent" | "slow"; message: string }
   | { kind: "network" | "unavailable" | "other"; message: string };
+
+// Sending took longer than the app waits (60 s). Auth may still deliver the
+// message, so the screen moves on to the code step with this notice.
+export const RESET_SLOW_EMAIL_MESSAGE =
+  "Sending is taking longer than usual. If an email arrives in the next few minutes, enter its code below (check your Spam folder too). If nothing arrives, send a new code.";
+export const RESET_SLOW_SMS_MESSAGE =
+  "Sending is taking longer than usual. If an SMS arrives in the next few minutes, enter its code below. If nothing arrives, send a new code.";
 
 export const RESET_REQUEST_MESSAGES = {
   network: "Could not reach Takalex. Check your connection and try again.",
@@ -79,6 +87,11 @@ export function resetRequestOutcome(error: RemoteError | null, channel: ResetCha
   const phone = channel === "phone";
   const sent = { kind: "sent" as const, message: phone ? RESET_SMS_SENT_MESSAGE : RESET_CODE_SENT_MESSAGE };
   if (!error) return sent;
+  // Our own time limit, not a dead connection: the code may still arrive.
+  // supabase-js passes the message on (as AuthRetryableFetchError, status 0).
+  if (error.message === TIMEOUT_MESSAGE) {
+    return { kind: "slow", message: phone ? RESET_SLOW_SMS_MESSAGE : RESET_SLOW_EMAIL_MESSAGE };
+  }
   if (isNetworkError(error)) return { kind: "network", message: RESET_REQUEST_MESSAGES.network };
   const code = error.code ?? "";
   if (error.status === 429 || /rate_limit/.test(code)) {

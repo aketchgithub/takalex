@@ -9,15 +9,21 @@
 export const REQUEST_TIMEOUT_MS = 20_000;
 // Evidence photos on slow mobile data.
 export const UPLOAD_TIMEOUT_MS = 120_000;
+// "Send code" for password reset: Auth only answers after the mail server
+// (or SMS provider) has accepted the message, and Chemolex's mail server can
+// take longer than 20 s (outgoing spam filter and relay).
+export const SEND_MESSAGE_TIMEOUT_MS = 60_000;
 
 export const TIMEOUT_MESSAGE = "The request timed out. Check your connection and try again.";
 
 const STORAGE_OBJECT_PATH = "/storage/v1/object";
+// Auth endpoints that send an email or SMS before answering.
+const SEND_MESSAGE_PATHS = ["/auth/v1/recover", "/auth/v1/otp"];
 
 type FetchLike = typeof fetch;
 type FetchInput = Parameters<FetchLike>[0];
 
-export type TimeoutLimits = { requestMs: number; uploadMs: number };
+export type TimeoutLimits = { requestMs: number; uploadMs: number; messageMs?: number };
 
 const DEFAULT_LIMITS: TimeoutLimits = { requestMs: REQUEST_TIMEOUT_MS, uploadMs: UPLOAD_TIMEOUT_MS };
 
@@ -28,7 +34,10 @@ function urlOf(input: FetchInput): string {
 }
 
 export function timeoutFor(url: string, limits: TimeoutLimits = DEFAULT_LIMITS): number {
-  return url.includes(STORAGE_OBJECT_PATH) ? limits.uploadMs : limits.requestMs;
+  if (url.includes(STORAGE_OBJECT_PATH)) return limits.uploadMs;
+  const path = url.split("?")[0];
+  if (SEND_MESSAGE_PATHS.some((p) => path.endsWith(p))) return limits.messageMs ?? SEND_MESSAGE_TIMEOUT_MS;
+  return limits.requestMs;
 }
 
 export function isTimeoutError(error: unknown): boolean {

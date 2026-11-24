@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   REQUEST_TIMEOUT_MS,
+  SEND_MESSAGE_TIMEOUT_MS,
   TIMEOUT_MESSAGE,
   UPLOAD_TIMEOUT_MS,
   createFetchWithTimeout,
@@ -49,6 +50,12 @@ describe("timeoutFor", () => {
     assert.equal(UPLOAD_TIMEOUT_MS, 120_000);
     assert.equal(timeoutFor(REST_URL), REQUEST_TIMEOUT_MS);
     assert.equal(timeoutFor(`${BASE}/auth/v1/token?grant_type=refresh_token`), REQUEST_TIMEOUT_MS);
+    // Sending a reset code waits for the mail server or SMS provider.
+    assert.equal(timeoutFor(`${BASE}/auth/v1/recover`), SEND_MESSAGE_TIMEOUT_MS);
+    assert.equal(timeoutFor(`${BASE}/auth/v1/recover?redirect_to=x`), SEND_MESSAGE_TIMEOUT_MS);
+    assert.equal(timeoutFor(`${BASE}/auth/v1/otp`), SEND_MESSAGE_TIMEOUT_MS);
+    assert.equal(timeoutFor(`${BASE}/auth/v1/verify`), REQUEST_TIMEOUT_MS);
+    assert.equal(SEND_MESSAGE_TIMEOUT_MS, 60_000);
     assert.equal(timeoutFor(`${BASE}/functions/v1/invite-user`), REQUEST_TIMEOUT_MS);
     assert.equal(timeoutFor(UPLOAD_URL), UPLOAD_TIMEOUT_MS);
   });

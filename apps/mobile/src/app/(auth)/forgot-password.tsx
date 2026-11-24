@@ -57,7 +57,8 @@ export default function ForgotPasswordScreen() {
     setBusy("send");
     const outcome = await requestPasswordReset(channel, address);
     setBusy(null);
-    if (outcome.kind === "sent" || outcome.kind === "already_sent") {
+    // "slow": the app stopped waiting, but the code may still arrive.
+    if (outcome.kind === "sent" || outcome.kind === "already_sent" || outcome.kind === "slow") {
       setSentTo(address);
       setNotice(outcome.message);
       setStep("code");

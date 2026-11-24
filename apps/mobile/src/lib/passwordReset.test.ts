@@ -6,6 +6,8 @@ import { TIMEOUT_MESSAGE } from "./fetchWithTimeout.ts";
 import {
   PHONE_CHANGE_MESSAGES,
   RESET_ALREADY_SENT_MESSAGE,
+  RESET_SLOW_EMAIL_MESSAGE,
+  RESET_SLOW_SMS_MESSAGE,
   RESET_CODE_SENT_MESSAGE,
   RESET_REQUEST_MESSAGES,
   RESET_SMS_ALREADY_SENT_MESSAGE,
@@ -112,9 +114,19 @@ describe("resetRequestOutcome", () => {
     assert.match(outcome.message, /^If an account uses this email/);
   });
 
-  it("reports no connection and timeouts", () => {
+  it("reports no connection", () => {
     assert.equal(resetRequestOutcome({ message: "Network request failed", status: 0, name: "AuthRetryableFetchError" }).kind, "network");
-    assert.equal(resetRequestOutcome({ message: TIMEOUT_MESSAGE, name: "AbortError" }).kind, "network");
+  });
+
+  it("treats our own time limit as slow sending: the code may still arrive", () => {
+    // As supabase-js passes it on, and as thrown by fetchWithTimeout.
+    for (const error of [
+      { message: TIMEOUT_MESSAGE, status: 0, name: "AuthRetryableFetchError" },
+      { message: TIMEOUT_MESSAGE, name: "AbortError" },
+    ]) {
+      assert.deepEqual(resetRequestOutcome(error), { kind: "slow", message: RESET_SLOW_EMAIL_MESSAGE });
+      assert.deepEqual(resetRequestOutcome(error, "phone"), { kind: "slow", message: RESET_SLOW_SMS_MESSAGE });
+    }
   });
 
   it("says reset is not switched on while the built-in sender refuses the address", () => {
