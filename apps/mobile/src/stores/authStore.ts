@@ -535,6 +535,12 @@ export const useAuthStore = create<AuthState>()(
             set({ isResettingPassword: false });
             return { ok: false, message: resetVerifyErrorMessage(toRemoteError(error ?? { message: "No session" })) };
           }
+          // The auth state listener only stores the new session on its next
+          // turn (setTimeout), after the screen has already called
+          // setResetPassword; store it now so that call (and leaving the
+          // screen) sees the signed-in user. isResettingPassword keeps the
+          // sign-in screens from sending them home.
+          set({ session: data.session, user: data.session.user });
           return { ok: true };
         } catch (error: unknown) {
           set({ isResettingPassword: false });
