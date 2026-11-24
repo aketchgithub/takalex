@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Switch, Text, View } from "react-native";
+import { StyleSheet, Switch, Text, View } from "react-native";
 
 import { AddToggle, ExpandableRow, IconButton } from "@/components/AdminList";
 import { ListCard } from "@/components/DeliveryList";
@@ -21,6 +21,7 @@ import {
 } from "@/lib/admin/materialModel";
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, useUiStyles } from "@/components/Ui";
 import { createMaterial, deleteMaterial, listAllMaterials, moveMaterial, updateMaterial } from "@/lib/admin/materials";
+import { confirmAction } from "@/lib/dialogs";
 import type { Palette } from "@/theme/tokens";
 import { useColors, useThemedStyles } from "@/theme/useTheme";
 
@@ -275,25 +276,27 @@ function MaterialRow({
 
   const changeStatus = () => {
     const next = !material.isActive;
-    Alert.alert(
-      next ? `Reactivate ${material.displayName}?` : `Deactivate ${material.displayName}?`,
-      next ? reactivateMaterialConfirmation(material.displayName) : deactivateMaterialConfirmation(material.displayName),
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: next ? "Reactivate" : "Deactivate",
-          style: next ? "default" : "destructive",
-          onPress: () => void run("status", () => updateMaterial(material.code, material.displayName, current, next)),
-        },
-      ],
-    );
+    void confirmAction({
+      title: next ? `Reactivate ${material.displayName}?` : `Deactivate ${material.displayName}?`,
+      message: next
+        ? reactivateMaterialConfirmation(material.displayName)
+        : deactivateMaterialConfirmation(material.displayName),
+      confirmLabel: next ? "Reactivate" : "Deactivate",
+      destructive: !next,
+    }).then((ok) => {
+      if (ok) void run("status", () => updateMaterial(material.code, material.displayName, current, next));
+    });
   };
 
   const remove = () => {
-    Alert.alert(`Delete ${material.displayName}?`, deleteMaterialConfirmation(material.displayName), [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => void run("delete", () => deleteMaterial(material.code)) },
-    ]);
+    void confirmAction({
+      title: `Delete ${material.displayName}?`,
+      message: deleteMaterialConfirmation(material.displayName),
+      confirmLabel: "Delete",
+      destructive: true,
+    }).then((ok) => {
+      if (ok) void run("delete", () => deleteMaterial(material.code));
+    });
   };
 
   const locked = busy !== null;

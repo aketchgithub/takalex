@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Linking, StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 
 import { AddToggle, ExpandableRow } from "@/components/AdminList";
 import { ListCard } from "@/components/DeliveryList";
@@ -25,6 +25,7 @@ import {
   type AdminSite,
 } from "@/lib/admin/siteModel";
 import { createSite, listAllSites, setSiteLocation, updateSite } from "@/lib/admin/sites";
+import { confirmAction } from "@/lib/dialogs";
 
 type ListState =
   | { status: "loading" }
@@ -200,22 +201,21 @@ function SiteRow({
   };
 
   const removeLocation = () => {
-    Alert.alert(`Remove ${site.name}'s location?`, REMOVE_LOCATION_CONFIRMATION, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          setBusy("location");
-          setError(null);
-          void setSiteLocation(site.id, null).then((failure) => {
-            setBusy(null);
-            if (failure) setError(failure);
-            else onChanged();
-          });
-        },
-      },
-    ]);
+    void confirmAction({
+      title: `Remove ${site.name}'s location?`,
+      message: REMOVE_LOCATION_CONFIRMATION,
+      confirmLabel: "Remove",
+      destructive: true,
+    }).then((ok) => {
+      if (!ok) return;
+      setBusy("location");
+      setError(null);
+      void setSiteLocation(site.id, null).then((failure) => {
+        setBusy(null);
+        if (failure) setError(failure);
+        else onChanged();
+      });
+    });
   };
 
   const saveName = async () => {
@@ -241,26 +241,21 @@ function SiteRow({
 
   const changeStatus = () => {
     const next = !site.active;
-    Alert.alert(
-      next ? `Reactivate ${site.name}?` : `Deactivate ${site.name}?`,
-      next ? reactivateConfirmation(site.name) : deactivateConfirmation(site.name),
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: next ? "Reactivate" : "Deactivate",
-          style: next ? "default" : "destructive",
-          onPress: () => {
-            setBusy("status");
-            setError(null);
-            void updateSite(site.id, site.name, next).then((failure) => {
-              setBusy(null);
-              if (failure) setError(failure);
-              else onChanged();
-            });
-          },
-        },
-      ],
-    );
+    void confirmAction({
+      title: next ? `Reactivate ${site.name}?` : `Deactivate ${site.name}?`,
+      message: next ? reactivateConfirmation(site.name) : deactivateConfirmation(site.name),
+      confirmLabel: next ? "Reactivate" : "Deactivate",
+      destructive: !next,
+    }).then((ok) => {
+      if (!ok) return;
+      setBusy("status");
+      setError(null);
+      void updateSite(site.id, site.name, next).then((failure) => {
+        setBusy(null);
+        if (failure) setError(failure);
+        else onChanged();
+      });
+    });
   };
 
   return (

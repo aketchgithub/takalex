@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
 import { CardHeader } from "@/components/AdminList";
@@ -20,6 +20,7 @@ import {
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton } from "@/components/Ui";
 import { listAccessRequests, rejectAccessRequest } from "@/lib/admin/requests";
 import { friendlyDateTime } from "@/lib/collectorView";
+import { confirmAction } from "@/lib/dialogs";
 import type { Palette } from "@/theme/tokens";
 import { useThemedStyles } from "@/theme/useTheme";
 import { roleLabels } from "@/types/auth";
@@ -116,21 +117,20 @@ function RequestCard({
     setNoteError(checked.error);
     if (!checked.note) return;
     const text = checked.note;
-    Alert.alert("Reject this request?", `${request.fullName} will not be invited. Note: “${text}”`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Reject",
-        style: "destructive",
-        onPress: () => {
-          setBusy(true);
-          setError(null);
-          rejectAccessRequest(request.id, text)
-            .then(onChanged)
-            .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not reject the request."))
-            .finally(() => setBusy(false));
-        },
-      },
-    ]);
+    void confirmAction({
+      title: "Reject this request?",
+      message: `${request.fullName} will not be invited. Note: “${text}”`,
+      confirmLabel: "Reject",
+      destructive: true,
+    }).then((ok) => {
+      if (!ok) return;
+      setBusy(true);
+      setError(null);
+      rejectAccessRequest(request.id, text)
+        .then(onChanged)
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not reject the request."))
+        .finally(() => setBusy(false));
+    });
   };
 
   return (

@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { FilterChips } from "@/components/FilterChips";
 import { InvitationCodeCard, type IssuedInvitation } from "@/components/InvitationCodeCard";
@@ -17,6 +17,7 @@ import {
   invitationDisplayStatus,
   type InvitationFilter,
 } from "@/lib/admin/model";
+import { confirmAction } from "@/lib/dialogs";
 import { formatDateTime } from "@/lib/outbox/presentation";
 import { roleLabels } from "@/types/auth";
 
@@ -118,44 +119,38 @@ function InvitationCard({
   const name = row.fullName ?? row.email;
 
   const revoke = () => {
-    Alert.alert("Revoke this invitation?", `The code sent to ${row.email} will stop working. You can reissue it later.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Revoke",
-        style: "destructive",
-        onPress: () => {
-          setBusy("revoke");
-          setError(null);
-          void revokeInvitation(row.id).then((failure) => {
-            setBusy(null);
-            if (failure) setError(failure);
-            else onChanged();
-          });
-        },
-      },
-    ]);
+    void confirmAction({
+      title: "Revoke this invitation?",
+      message: `The code sent to ${row.email} will stop working. You can reissue it later.`,
+      confirmLabel: "Revoke",
+      destructive: true,
+    }).then((ok) => {
+      if (!ok) return;
+      setBusy("revoke");
+      setError(null);
+      void revokeInvitation(row.id).then((failure) => {
+        setBusy(null);
+        if (failure) setError(failure);
+        else onChanged();
+      });
+    });
   };
 
   const reissue = () => {
-    Alert.alert(
-      "Reissue this invitation?",
-      `A new code will be created for ${row.email}, valid for 7 days, and shown once. The old code stays invalid.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reissue",
-          onPress: () => {
-            setBusy("reissue");
-            setError(null);
-            void reissueInvitation(row.id).then((result) => {
-              setBusy(null);
-              if (!result.ok) setError(result.message);
-              else onIssued({ code: result.issued.code, email: row.email, role: row.role, expiresAt: result.issued.expiresAt });
-            });
-          },
-        },
-      ],
-    );
+    void confirmAction({
+      title: "Reissue this invitation?",
+      message: `A new code will be created for ${row.email}, valid for 7 days, and shown once. The old code stays invalid.`,
+      confirmLabel: "Reissue",
+    }).then((ok) => {
+      if (!ok) return;
+      setBusy("reissue");
+      setError(null);
+      void reissueInvitation(row.id).then((result) => {
+        setBusy(null);
+        if (!result.ok) setError(result.message);
+        else onIssued({ code: result.issued.code, email: row.email, role: row.role, expiresAt: result.issued.expiresAt });
+      });
+    });
   };
 
   return (

@@ -1,11 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Card, Row, SectionHeading } from "@/components/ReviewUi";
 import { DeliveryStatusRow } from "@/components/StatusBadge";
 import { Field, InlineLink, Message, PrimaryButton, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
 import { friendlyDateTime } from "@/lib/collectorView";
+import { confirmAction, showNotice } from "@/lib/dialogs";
 import { formatKg } from "@/lib/outbox/presentation";
 import {
   fetchVerifiableMaterials,
@@ -270,14 +271,13 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
         setServerError({ kind, message: failure });
         return;
       }
-      Alert.alert(
-        kind === "approve" ? "Delivery approved" : "Delivery rejected",
-        kind === "approve"
-          ? "The verified breakdown was saved. The delivery is eligible for payment."
-          : "The rejection and its reason were saved.",
-        [{ text: "OK", onPress: onDone }],
-        { cancelable: false },
-      );
+      void showNotice({
+        title: kind === "approve" ? "Delivery approved" : "Delivery rejected",
+        message:
+          kind === "approve"
+            ? "The verified breakdown was saved. The delivery is eligible for payment."
+            : "The rejection and its reason were saved.",
+      }).then(onDone);
     } finally {
       submitting.current = false;
       setBusy(null);
@@ -294,10 +294,13 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
     setServerError(null);
     const items = check.items;
     if (!items) return;
-    Alert.alert("Approve this delivery?", approveConfirmation(check.totalText), [
-      { text: "Cancel", style: "cancel" },
-      { text: "Approve", onPress: () => void send({ approved: true, items }, "approve") },
-    ]);
+    void confirmAction({
+      title: "Approve this delivery?",
+      message: approveConfirmation(check.totalText),
+      confirmLabel: "Approve",
+    }).then((ok) => {
+      if (ok) void send({ approved: true, items }, "approve");
+    });
   };
 
   const reject = () => {
@@ -305,10 +308,14 @@ function ReviewForm({ delivery, onDone }: { delivery: DeliveryDetail; onDone: ()
     const { reason, error } = checkRejectionReason(reasonText);
     setReasonError(error);
     if (!reason) return;
-    Alert.alert("Reject this delivery?", rejectConfirmation(reason), [
-      { text: "Cancel", style: "cancel" },
-      { text: "Reject", style: "destructive", onPress: () => void send({ approved: false, reason }, "reject") },
-    ]);
+    void confirmAction({
+      title: "Reject this delivery?",
+      message: rejectConfirmation(reason),
+      confirmLabel: "Reject",
+      destructive: true,
+    }).then((ok) => {
+      if (ok) void send({ approved: false, reason }, "reject");
+    });
   };
 
   return (

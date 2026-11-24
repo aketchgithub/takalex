@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import { DeliveryRow, ListCard } from "@/components/DeliveryList";
 import { SectionHeading } from "@/components/ReviewUi";
@@ -9,6 +9,7 @@ import { InlineLink, Message, Screen, SecondaryButton, useUiStyles } from "@/com
 import { cachedMaterialNames } from "@/lib/collectorContext";
 import { deliveryDetail, deliveryPillLabel, deliveryTitle, friendlyDateTime } from "@/lib/collectorView";
 import { listMyDeliveries } from "@/lib/deliveries";
+import { confirmAction } from "@/lib/dialogs";
 import { discardDelivery, retryDelivery, subscribeOutbox, type OutboxRow } from "@/lib/outbox";
 import {
   discardConfirmation,
@@ -101,22 +102,20 @@ export default function DeliveryHistoryScreen() {
   };
 
   const confirmDiscard = (row: OutboxRow) => {
-    Alert.alert("Discard this delivery?", discardConfirmation(row), [
-      { text: "Keep it", style: "cancel" },
-      {
-        text: "Discard",
-        style: "destructive",
-        onPress: () => {
-          setBusyId(row.clientRecordId);
-          setActionError(null);
-          discardDelivery(row.clientRecordId)
-            .catch((error: unknown) =>
-              setActionError(error instanceof Error ? error.message : "Could not discard the delivery."),
-            )
-            .finally(() => setBusyId(null));
-        },
-      },
-    ]);
+    void confirmAction({
+      title: "Discard this delivery?",
+      message: discardConfirmation(row),
+      confirmLabel: "Discard",
+      cancelLabel: "Keep it",
+      destructive: true,
+    }).then((ok) => {
+      if (!ok) return;
+      setBusyId(row.clientRecordId);
+      setActionError(null);
+      discardDelivery(row.clientRecordId)
+        .catch((error: unknown) => setActionError(error instanceof Error ? error.message : "Could not discard the delivery."))
+        .finally(() => setBusyId(null));
+    });
   };
 
   return (
