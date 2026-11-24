@@ -25,6 +25,9 @@ const HERO = require("../../assets/landing-hero.jpg");
 // landing-hero.jpg is 1340 x 1400 px.
 const HERO_ASPECT = 1400 / 1340;
 const HERO_SCREEN_SHARE = 0.4;
+// From this window width (a laptop browser) the whole photo sits on the left
+// and the green panel beside it; narrower screens (phones) stack them.
+const SIDE_BY_SIDE_MIN_WIDTH = 900;
 
 const STEPS = [
   {
@@ -87,6 +90,12 @@ export function Landing({
   // usually taller than the hero, so the extra is cut from the bottom and
   // the card in its top-right corner stays visible.
   const heroHeight = Math.round(height * HERO_SCREEN_SHARE);
+  const sideBySide = width >= SIDE_BY_SIDE_MIN_WIDTH;
+  // Side by side, the photo gets an exact size in its own proportions (45% of
+  // the page width), so it is never stretched or cropped; the panel beside it
+  // takes the same height.
+  const besideWidth = Math.round(Math.min(width, CONTENT_MAX_WIDTH) * 0.45);
+  const besideHeight = Math.round(besideWidth * HERO_ASPECT);
   // The page is at most CONTENT_MAX_WIDTH wide (centred on a laptop).
   const imageHeight = Math.max(heroHeight, Math.round(Math.min(width, CONTENT_MAX_WIDTH) * HERO_ASPECT));
 
@@ -100,6 +109,21 @@ export function Landing({
 
   const side = { paddingLeft: 24 + insets.left, paddingRight: 24 + insets.right };
 
+  const panelContent = (
+    <>
+      <Text style={styles.panelBrand}>
+        TAKALEX <Text style={styles.panelBrandBy}>by Chemolex</Text>
+      </Text>
+      <Text accessibilityRole="header" style={styles.headline}>
+        Every kilo of plastic, counted and verified.
+      </Text>
+      <Text style={styles.panelText}>
+        Takalex records what waste pickers deliver at each collection site, so the weight is
+        checked, recorded and visible to recyclers.
+      </Text>
+    </>
+  );
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -107,29 +131,38 @@ export function Landing({
         onScroll={onScroll}
         scrollEventThrottle={32}
       >
-        <View style={[styles.hero, { height: heroHeight }]}>
-          <Image
-            accessibilityLabel="A waste picker checks a verified delivery on her phone."
-            accessibilityRole="image"
-            accessible
-            resizeMode="cover"
-            source={HERO}
-            style={[styles.heroImage, { height: imageHeight }]}
-          />
-        </View>
-
-        <View style={[styles.panel, side]}>
-          <Text style={styles.panelBrand}>
-            TAKALEX <Text style={styles.panelBrandBy}>by Chemolex</Text>
-          </Text>
-          <Text accessibilityRole="header" style={styles.headline}>
-            Every kilo of plastic, counted and verified.
-          </Text>
-          <Text style={styles.panelText}>
-            Takalex records what waste pickers deliver at each collection site, so the weight is
-            checked, recorded and visible to recyclers.
-          </Text>
-        </View>
+        {sideBySide ? (
+          // Laptop: the whole photo on the left, the panel beside it.
+          <View style={styles.heroRow}>
+            <Image
+              accessibilityLabel="A waste picker checks a verified delivery on her phone."
+              accessibilityRole="image"
+              accessible
+              resizeMode="cover"
+              source={HERO}
+              style={{ height: besideHeight, width: besideWidth }}
+            />
+            <View style={[styles.panel, styles.panelBeside]}>
+              {panelContent}
+            </View>
+          </View>
+        ) : (
+          <>
+            <View style={[styles.hero, { height: heroHeight }]}>
+              <Image
+                accessibilityLabel="A waste picker checks a verified delivery on her phone."
+                accessibilityRole="image"
+                accessible
+                resizeMode="cover"
+                source={HERO}
+                style={[styles.heroImage, { height: imageHeight }]}
+              />
+            </View>
+            <View style={[styles.panel, side]}>
+              {panelContent}
+            </View>
+          </>
+        )}
 
         <View style={[styles.actions, side]}>
           <PrimaryButton label="Request access" onPress={onRequestAccess} />
@@ -208,6 +241,8 @@ const makeStyles = (c: Palette) =>
       paddingBottom: 28,
       paddingTop: 24,
     },
+    heroRow: { alignItems: "stretch", flexDirection: "row" },
+    panelBeside: { flex: 1, justifyContent: "center", paddingHorizontal: 40 },
     panelBrand: {
       color: c.onPrimary,
       fontSize: 14,
