@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { InlineLink, PrimaryButton, SecondaryButton } from "@/components/Ui";
+import { CONTENT_MAX_WIDTH, InlineLink, PrimaryButton, SecondaryButton } from "@/components/Ui";
 import { getPublicSiteOptions, type PublicSiteOption } from "@/lib/access";
 import type { Palette } from "@/theme/tokens";
 import { useThemedStyles } from "@/theme/useTheme";
@@ -87,7 +87,8 @@ export function Landing({
   // usually taller than the hero, so the extra is cut from the bottom and
   // the card in its top-right corner stays visible.
   const heroHeight = Math.round(height * HERO_SCREEN_SHARE);
-  const imageHeight = Math.max(heroHeight, Math.round(width * HERO_ASPECT));
+  // The page is at most CONTENT_MAX_WIDTH wide (centred on a laptop).
+  const imageHeight = Math.max(heroHeight, Math.round(Math.min(width, CONTENT_MAX_WIDTH) * HERO_ASPECT));
 
   // The photo runs under the status bar. Once the page is scrolled past it,
   // a plain strip keeps the text from showing through the status bar.
@@ -102,7 +103,7 @@ export function Landing({
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 32 + insets.bottom }}
+        contentContainerStyle={[styles.page, { paddingBottom: 32 + insets.bottom }]}
         onScroll={onScroll}
         scrollEventThrottle={32}
       >
@@ -185,6 +186,12 @@ const makeStyles = (c: Palette) =>
     root: {
       backgroundColor: c.background,
       flex: 1,
+    },
+    // On a laptop the page stays centred at a readable width.
+    page: {
+      alignSelf: "center",
+      maxWidth: CONTENT_MAX_WIDTH,
+      width: "100%",
     },
     hero: {
       backgroundColor: c.primary,

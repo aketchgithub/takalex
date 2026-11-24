@@ -3,10 +3,10 @@
 // (explicit columns, under RLS) and cached on the phone per user, so a
 // collector who has opened the app online once can log deliveries offline.
 
-import Storage from "expo-sqlite/kv-store";
 import { z } from "zod";
 
 import { loadAccountSummary, type AssignedSite } from "@/lib/account";
+import { kvStore as Storage } from "@/lib/kvStore";
 import { supabase } from "@/lib/supabase";
 import type { Profile } from "@/types/auth";
 

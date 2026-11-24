@@ -25,6 +25,11 @@ import { useColors, useThemedStyles } from "@/theme/useTheme";
 
 export type ScreenScrollView = ComponentRef<typeof ScrollView>;
 
+// Screens never grow wider than this, so on a laptop or tablet the content
+// stays centred and uses most of the screen without stretching across very
+// large monitors (phones are narrower, so nothing changes).
+export const CONTENT_MAX_WIDTH = 1200;
+
 // One spacing scale for every screen.
 export const uiSpace = { xs: space.xs, sm: space.sm, md: space.md, lg: space.lg } as const;
 
@@ -387,9 +392,12 @@ const makeStyles = (colors: Palette) =>
       flex: 1,
     },
     content: {
+      alignSelf: "center",
       flexGrow: 1,
       justifyContent: "center",
+      maxWidth: CONTENT_MAX_WIDTH,
       padding: 24,
+      width: "100%",
     },
     topLink: {
       marginBottom: 8,
