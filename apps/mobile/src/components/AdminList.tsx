@@ -3,10 +3,10 @@
 // opens an "add" form. They keep Sites, Materials, Access and Invitations
 // looking the same.
 
-import Feather from "@expo/vector-icons/Feather";
 import type { ComponentProps, PropsWithChildren, ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import Feather from "@/components/Feather";
 import { StatusBadge, type StatusTone } from "@/components/StatusBadge";
 import { uiStylesOf, useUiStyles } from "@/components/Ui";
 import { radius, touch, type, type Palette } from "@/theme/tokens";

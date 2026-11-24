@@ -9,12 +9,16 @@ import { showsSidebar } from "@/lib/sidebar";
 // (app/(admin)/invite.tsx, on the stack above the tabs). In a wide browser
 // window the tabs are shown as a sidebar on the left instead of the bottom
 // tab bar (lib/sidebar.ts).
+//
+// Sites and Account have admin-only file names (manage-sites, admin-account)
+// so their web addresses do not clash with the public /sites page or the
+// other roles' /account pages when the browser reloads.
 const ITEMS: SidebarItem[] = [
   { name: "index", title: "Overview", icon: "grid", href: "/(admin)/(tabs)" },
   { name: "access-requests", title: "Access requests", icon: "user-check", href: "/(admin)/(tabs)/access-requests" },
   { name: "invitations", title: "Invitations", icon: "mail", href: "/(admin)/(tabs)/invitations" },
-  { name: "sites", title: "Sites", icon: "map-pin", href: "/(admin)/(tabs)/sites" },
-  { name: "account", title: "Account", icon: "user", href: "/(admin)/(tabs)/account" },
+  { name: "manage-sites", title: "Sites", icon: "map-pin", href: "/(admin)/(tabs)/manage-sites" },
+  { name: "admin-account", title: "Account", icon: "user", href: "/(admin)/(tabs)/admin-account" },
 ];
 
 function hiddenTabBar() {
@@ -36,8 +40,8 @@ export default function AdminTabsLayout() {
             options={{ title: "Access", tabBarAccessibilityLabel: "Access requests", tabBarIcon: tabIcon("user-check") }}
           />
           <Tabs.Screen name="invitations" options={{ title: "Invitations", tabBarIcon: tabIcon("mail") }} />
-          <Tabs.Screen name="sites" options={{ title: "Sites", tabBarIcon: tabIcon("map-pin") }} />
-          <Tabs.Screen name="account" options={{ title: "Account", tabBarIcon: tabIcon("user") }} />
+          <Tabs.Screen name="manage-sites" options={{ title: "Sites", tabBarIcon: tabIcon("map-pin") }} />
+          <Tabs.Screen name="admin-account" options={{ title: "Account", tabBarIcon: tabIcon("user") }} />
         </Tabs>
       </View>
     </View>

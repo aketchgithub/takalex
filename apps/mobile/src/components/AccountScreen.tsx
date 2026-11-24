@@ -4,12 +4,12 @@
 // size and light/dark appearance, kept on this phone), About (app version) and Sign out. Sites are read
 // from the database under RLS (lib/account.ts).
 
-import Feather from "@expo/vector-icons/Feather";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
+import Feather from "@/components/Feather";
 import { Message, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";
 import { collectorGroupLabel, loadAccountSummary, type AssignedSite } from "@/lib/account";
 import { appVersionLabel, initials, roleLine, showsAssignedSites } from "@/lib/accountView";

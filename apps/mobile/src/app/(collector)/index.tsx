@@ -1,9 +1,9 @@
-import Feather from "@expo/vector-icons/Feather";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { DeliveryRow, ListCard } from "@/components/DeliveryList";
+import Feather from "@/components/Feather";
 import { SectionHeading } from "@/components/ReviewUi";
 import { DELIVERY_TONES } from "@/components/StatusBadge";
 import { InlineLink, Message, Screen, SecondaryButton, uiStylesOf, useUiStyles } from "@/components/Ui";

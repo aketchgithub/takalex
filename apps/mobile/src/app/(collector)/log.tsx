@@ -1,9 +1,9 @@
-import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { EvidenceCamera, type CapturedPhoto } from "@/components/EvidenceCamera";
+import Feather from "@/components/Feather";
 import { Field, InlineLink, Message, PrimaryButton, Screen, type ScreenScrollView, SecondaryButton, uiStylesOf } from "@/components/Ui";
 import { loadCollectorContext, type CollectorContext } from "@/lib/collectorContext";
 import { getOutboxRow, saveSubmission } from "@/lib/outbox";

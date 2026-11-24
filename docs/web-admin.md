@@ -43,7 +43,9 @@ grep -rl "<project-ref>.supabase.co" dist | head -1
    site's Deploys page. Earlier deploys stay listed and can be restored.
 
 `public/_redirects` (copied into `dist/`) sends every path to `index.html`, so
-reloading or opening a link such as `/sites` works.
+reloading or opening a link such as `/manage-sites` works. Admin pages have
+admin-only addresses (`/manage-sites`, `/admin-account`) so a reload never lands
+on the public `/sites` page or another role's `/account` page.
 
 ## A Chemolex address (optional)
 

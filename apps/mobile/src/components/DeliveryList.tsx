@@ -4,9 +4,9 @@
 // opens something (a chevron shows it). Collector and manager lists use it.
 
 import { Children, Fragment, type PropsWithChildren, type ReactNode } from "react";
-import Feather from "@expo/vector-icons/Feather";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import Feather from "@/components/Feather";
 import { StatusBadge, type StatusTone } from "@/components/StatusBadge";
 import { uiStylesOf, useUiStyles } from "@/components/Ui";
 import { type, type Palette } from "@/theme/tokens";

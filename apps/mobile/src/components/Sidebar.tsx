@@ -2,11 +2,11 @@
 // when). Replaces the bottom tab bar there; phones and narrow windows keep
 // the tab bar. Highlights the current page from the URL.
 
-import Feather from "@expo/vector-icons/Feather";
 import { router, usePathname, type Href } from "expo-router";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import Feather from "@/components/Feather";
 import type { TabIconName } from "@/components/TabBar";
 import { isCurrentTab } from "@/lib/sidebar";
 import { radius, type, type Palette } from "@/theme/tokens";

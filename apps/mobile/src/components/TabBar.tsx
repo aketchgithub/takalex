@@ -2,11 +2,11 @@
 // active tab has a 3px primary bar on top and primary icon and text. Labels
 // follow the user's text size, within limits so four tabs still fit.
 
-import Feather from "@expo/vector-icons/Feather";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, View, type ColorValue } from "react-native";
 
+import Feather from "@/components/Feather";
 import { CONTENT_MAX_WIDTH } from "@/components/Ui";
 import { type, type Palette } from "@/theme/tokens";
 import { useFontSize } from "@/theme/useFontSize";
